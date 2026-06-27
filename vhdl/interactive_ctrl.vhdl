@@ -33,7 +33,7 @@ begin
         variable handle : integer := -1;
         variable v      : integer;
     begin
-        ctrl_open(handle, NAME, NAME'length, WIDTH);
+        ctrl_open(handle, pad_name(NAME), NAME'length, WIDTH);
         value <= (others => '0');
         loop
             wait for POLL_US * 1 us;

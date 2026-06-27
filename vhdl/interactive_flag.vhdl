@@ -30,7 +30,7 @@ begin
         variable handle : integer := -1;
     begin
         if handle = -1 then
-            flag_open(handle, NAME, NAME'length, WIDTH);
+            flag_open(handle, pad_name(NAME), NAME'length, WIDTH);
         end if;
         -- sim time in us (ns precision preserved as a fractional part)
         flag_write(handle, real(now / 1 ns) / 1000.0, slv2int(value));

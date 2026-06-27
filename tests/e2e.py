@@ -37,6 +37,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -80,7 +81,7 @@ def run_one(sim, dist, build_timeout, read_timeout):
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind(("127.0.0.1", port))
     srv.listen(1)
-    srv.settimeout(build_timeout)             # build can be slow (Verilator)
+    srv.settimeout(1.0)                        # poll cadence; deadline enforced below
 
     args = ["make", target, f"STREAM=127.0.0.1:{port}"]
     env = os.environ.copy()
@@ -92,31 +93,56 @@ def run_one(sim, dist, build_timeout, read_timeout):
         for var in ("PATH", "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"):
             env[var] = dabs + os.pathsep + env.get(var, "")
 
+    # Spool the build/run output to a real file, NOT a PIPE. Verilator's verbose
+    # build can fill an undrained OS pipe buffer (small on Windows) and then block
+    # mid-compile waiting for someone to read it -- which looks exactly like a hung
+    # or pathologically slow build. We only need the tail on failure, so a temp
+    # file sidesteps the whole problem without a draining thread.
+    logf = tempfile.TemporaryFile(mode="w+", encoding="utf-8", errors="replace")
     proc = subprocess.Popen(args, cwd=ROOT, env=env, text=True,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                            stdout=logf, stderr=subprocess.STDOUT)
+
+    def out_tail(n=25):
+        try:
+            logf.flush()
+            logf.seek(0)
+            return "\n".join(logf.read().splitlines()[-n:])
+        except Exception:
+            return ""
 
     def fail(msg):
         try:
             proc.kill()
         except OSError:
             pass
-        out = ""
         try:
-            out = proc.communicate(timeout=10)[0] or ""
+            proc.wait(timeout=10)
         except Exception:
             pass
         srv.close()
         print(f"  FAIL [{sim}] {msg}")
-        tail = "\n".join(out.splitlines()[-25:])
+        tail = out_tail()
         if tail:
             print("    --- make output (tail) ---")
             print("\n".join("    " + ln for ln in tail.splitlines()))
+        logf.close()
         return False
 
-    try:
-        conn, _ = srv.accept()
-    except socket.timeout:
-        return fail("simulation never connected to the viewer socket")
+    # Wait for the sim to connect, allowing a slow build, but fail fast if the
+    # build/run process exits first instead of blocking the whole window.
+    conn = None
+    deadline = time.time() + build_timeout
+    while time.time() < deadline:
+        try:
+            conn, _ = srv.accept()
+            break
+        except socket.timeout:
+            if proc.poll() is not None:        # make exited without connecting
+                break
+    if conn is None:
+        return fail("build/run process exited before connecting"
+                    if proc.poll() is not None
+                    else f"simulation never connected within {build_timeout}s")
 
     regs, flags = set(), 0
     conn.settimeout(read_timeout)
@@ -153,6 +179,7 @@ def run_one(sim, dist, build_timeout, read_timeout):
     except subprocess.TimeoutExpired:
         proc.kill()
     srv.close()
+    logf.close()
 
     missing = EXPECT_REG - regs
     if missing:
@@ -172,7 +199,7 @@ def main():
                     help="comma-separated subset of: " + ", ".join(SIMS) + ", or 'all'")
     ap.add_argument("--dist", default=None,
                     help="test the PREBUILT artifacts in this dir (demo-*-dist)")
-    ap.add_argument("--build-timeout", type=int, default=120)
+    ap.add_argument("--build-timeout", type=int, default=180)
     ap.add_argument("--read-timeout", type=int, default=30)
     args = ap.parse_args()
 

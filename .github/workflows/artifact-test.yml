@@ -1,20 +1,19 @@
 name: Artifact test (reusable)
 
 # Drive the demo against the PREBUILT bundles (uploaded earlier in the run by
-# build-artifacts.yml) with every gated FOSS simulator available per OS, and
-# assert the protocol handshake. The backend is NOT recompiled -- each simulator
-# links/loads the shipped library, exactly as a downstream user would. Reused by
-# ci.yml (PR / push) and release.yml (gate a tag before publishing).
-#
-# Gated simulators: Verilator (DPI), Icarus (VPI), NVC (VHPIDIRECT). GHDL is
-# EXPERIMENTAL and not gated here (see test.yml for why); the VHPIDIRECT library
-# it would load is the same one NVC exercises.
+# build-artifacts.yml) with every FOSS simulator available per OS, and compare
+# the streamed events to the expected protocol handshake. The backend is NOT
+# recompiled -- each simulator links/loads the shipped library, exactly as a
+# downstream user would. Reused by ci.yml (PR / push) and release.yml (gate a tag
+# before publishing).
 on:
   workflow_call:
 
 jobs:
-  # POSIX bundles: Verilator (DPI), NVC (VHPIDIRECT), Icarus (VPI), on Linux and
-  # macOS. The harness skips any simulator that isn't installed.
+  # POSIX bundles: Verilator (DPI), GHDL + NVC (VHPIDIRECT, linked at
+  # elaboration), Icarus (VPI), on both Linux and macOS. The harness skips any
+  # simulator that isn't installed. mcode is exercised in its own jobs (it needs
+  # a separate, mcode-backend GHDL install).
   artifact-test:
     name: artifact-test (${{ matrix.name }})
     strategy:
@@ -27,9 +26,9 @@ jobs:
           - { name: macos-x86_64, os: macos-15-intel,    artifact: interactive-macos-x86_64 }
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Download prebuilt artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ matrix.artifact }}
           path: dist
@@ -42,26 +41,41 @@ jobs:
             build-essential verilator iverilog
       - name: Install FOSS simulators (macOS)
         if: runner.os == 'macOS'
-        run: brew install verilator icarus-verilog
+        run: brew install verilator ghdl icarus-verilog
       - name: Install NVC
         uses: ./.github/actions/setup-nvc      # installs Homebrew on arm64 Linux too
 
-      - name: Test prebuilt artifacts (Verilator/DPI, Icarus/VPI, NVC/VHPIDIRECT)
-        run: python3 tests/e2e.py --dist dist --sim dpi,vpi,nvc
+      - name: Setup GHDL (Linux x86_64)
+        if: runner.os == 'Linux' && runner.arch == 'X64'
+        uses: ghdl/setup-ghdl@v1
+        with:
+          backend: llvm
+      - name: Setup GHDL (Linux arm64)
+        if: runner.os == 'Linux' && runner.arch == 'ARM64'
+        run: sudo apt-get install -y ghdl-gcc
 
-  # Windows (MinGW) bundle: NVC (VHPIDIRECT, loaded at runtime with --load) and
-  # Icarus (VPI, loads the shipped .vpi). DPI/Verilator is not exercised here --
-  # building a Verilator DPI executable under MSYS2 is slow/heavy in CI; the
-  # Windows DPI library + import lib are build-verified (the artifact job), and
-  # DPI is e2e-tested on Linux and macOS. The MSVC bundle is not tested here:
-  # only commercial sims (Questa) consume it.
+      - name: Test prebuilt artifacts (Verilator/DPI, GHDL+NVC/VHPIDIRECT, Icarus/VPI)
+        run: python3 tests/e2e.py --dist dist --sim dpi,vpi,nvc,vhpi
+
+  # Windows (MinGW) bundle: Verilator (DPI, links the shipped import lib), NVC
+  # (VHPIDIRECT, loaded at runtime with --load), and Icarus (VPI, loads the
+  # shipped .vpi). GHDL/VHPI is split into its own job below: ghdl-llvm pulls a
+  # newer gcc/libstdc++ that is ABI-skewed against the prebuilt Verilator package
+  # and breaks its link, so the two can't share one MSYS2 toolchain. Not run
+  # here: the MSVC bundle -- only commercial sims (Questa) consume it.
+  #
+  # Verilator comes from oss-cad-suite (5.049), NOT MSYS2: the MSYS2 verilator's
+  # DPI --build of the coroutine `--timing` runtime is slow/variable on the rolling
+  # MSYS2 gcc; oss-cad's builds the same demo in seconds. MSYS2 still provides g++
+  # (verilator's --build invokes it -- oss-cad ships no compiler), python, make,
+  # and iverilog.
   artifact-test-windows:
     name: artifact-test (windows-x86_64-mingw)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Download prebuilt artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: interactive-windows-x86_64-mingw
           path: dist
@@ -69,6 +83,10 @@ jobs:
         uses: nickg/setup-nvc@v1
         with:
           version: latest
+      - name: Setup oss-cad-suite (provides Verilator 5.049)
+        uses: YosysHQ/setup-oss-cad-suite@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Set up MSYS2 (MinGW64)
         uses: msys2/setup-msys2@v2
         with:
@@ -78,10 +96,98 @@ jobs:
           install: >-
             make
             mingw-w64-x86_64-python
+            mingw-w64-x86_64-gcc
             mingw-w64-x86_64-iverilog
-      - name: Test prebuilt artifacts (NVC/VHPIDIRECT --load, Icarus/VPI)
+      # Use oss-cad's verilator_bin (its perl `verilator` wrapper needs Pod::Usage,
+      # absent in the MSYS2 perl); point VERILATOR_ROOT at its bundled headers.
+      - name: Test prebuilt artifacts (Verilator/DPI, NVC/VHPIDIRECT --load, Icarus/VPI)
         shell: msys2 {0}
         run: |
+          export VERILATOR_ROOT="$(dirname "$(command -v verilator_bin)")/../share/verilator"
+          export VERILATOR=verilator_bin
+          verilator_bin --version
           nvc --version
           iverilog -V | head -1
-          python3 tests/e2e.py --dist dist --sim nvc,vpi
+          python3 tests/e2e.py --dist dist --sim dpi,nvc,vpi
+
+  # Windows GHDL/VHPI, isolated (see note above). GHDL's LLVM backend links the
+  # shipped VHPI import lib at elaboration and loads the DLL at run time.
+  artifact-test-windows-ghdl:
+    name: artifact-test (windows-x86_64-mingw, GHDL)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download prebuilt artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: interactive-windows-x86_64-mingw
+          path: dist
+      - name: Set up MSYS2 (MinGW64)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            make
+            mingw-w64-x86_64-python
+            mingw-w64-x86_64-ghdl-llvm
+      - name: Test prebuilt artifacts (GHDL/VHPI, LLVM backend)
+        shell: msys2 {0}
+        run: |
+          ghdl --version | head -1
+          python3 tests/e2e.py --dist dist --sim vhpi
+
+  # GHDL mcode backend (x86_64 only -- mcode has no arm64/macOS codegen). No link
+  # step: it loads the prebuilt VHPI library named in the generated _mcode
+  # wrapper. Separate from the gcc/llvm jobs because one `ghdl` install is one
+  # backend. Linux here; Windows below.
+  artifact-test-mcode:
+    name: artifact-test (linux-x86_64, GHDL mcode)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download prebuilt artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: interactive-linux-x86_64
+          path: dist
+      - name: Install make
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends make
+      - name: Setup GHDL (mcode)
+        uses: ghdl/setup-ghdl@v1
+        with:
+          backend: mcode
+      - name: Test prebuilt artifact (GHDL/VHPI, mcode backend)
+        run: |
+          ghdl --version | head -1
+          python3 tests/e2e.py --dist dist --sim mcode
+
+  # Windows GHDL mcode. Install the mcode package EXPLICITLY: the bare
+  # mingw-w64-x86_64-ghdl name resolves to the LLVM provider, so it must be
+  # -ghdl-mcode here.
+  artifact-test-windows-mcode:
+    name: artifact-test (windows-x86_64-mingw, GHDL mcode)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download prebuilt artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: interactive-windows-x86_64-mingw
+          path: dist
+      - name: Set up MSYS2 (MinGW64)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            make
+            mingw-w64-x86_64-python
+            mingw-w64-x86_64-ghdl-mcode
+      - name: Test prebuilt artifact (GHDL/VHPI, mcode backend)
+        shell: msys2 {0}
+        run: |
+          ghdl --version | head -1
+          python3 tests/e2e.py --dist dist --sim mcode

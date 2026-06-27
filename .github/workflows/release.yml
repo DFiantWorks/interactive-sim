@@ -34,14 +34,14 @@ jobs:
       contents: write          # create the release / upload assets
     steps:
       - name: Download per-platform release archives
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: release-*
           path: release
           merge-multiple: true
       - run: ls -l release
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: release/*.tar.gz
           generate_release_notes: true

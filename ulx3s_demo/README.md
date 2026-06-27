@@ -8,8 +8,8 @@ their position on the board**.
 ![The ULX3S GUI demo running: the simulation drives the LEDs and mouse clicks on
 the board buttons feed back into the design.](ulx3s_demo.gif)
 
-It reuses the framework unchanged — the same `interactive_ctrl` / `interactive_flag`
-components, the same C++ backend and VPI shim from `../` — and adds only:
+It reuses the framework unchanged (the same `interactive_ctrl` / `interactive_flag`
+components, the same C++ backend and VPI shim from `../`) and adds only:
 
 | File | Role |
 |------|------|
@@ -34,7 +34,7 @@ cached next to `ulx3s.json` on first run.
 Controls (mouse, or the mirrored keys): **◀ / ▶** set the scanner sweep
 direction, **▲ / ▼** change speed, **F1** (space) pauses/resumes, **F2** (enter)
 resets to LED0, and **PWR** (p) lights the whole bar while held. Each board
-button is *momentary* — the GUI sends `1` on press and `0` on release, and the
+button is *momentary*: the GUI sends `1` on press and `0` on release, and the
 design edge-detects it.
 
 ## How it maps to the framework
@@ -83,4 +83,4 @@ throttles itself to the wall clock via `$rt_sync`, a **demo-only** VPI helper
 (`realtime_vpi.cpp`) loaded alongside the framework's `interactive` module
 (`-m interactive -m realtime`). The framework itself is untouched; pacing is
 purely a property of this demo. (Measured: ~5 LED updates per real second at the
-default speed — human rate, not a flood.)
+default speed, human rate, not a flood.)

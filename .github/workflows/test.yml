@@ -1,17 +1,17 @@
 name: Test (reusable)
 
 # End-to-end test from source: build the demo for each foreign interface
-# (DPI/VPI/NVC), have it connect to a listener over TCP, and assert the protocol
-# handshake (every component announces itself; the heartbeat flag streams
-# values). Reused by ci.yml (PR / push) and release.yml (gate a tag before
-# publishing). Run on x86_64 and arm64 Linux to prove cross-architecture
+# (DPI/VHPI/VPI), have it connect to a listener over TCP, and assert the
+# protocol handshake (every component announces itself; the heartbeat flag
+# streams values). Reused by ci.yml (PR / push) and release.yml (gate a tag
+# before publishing). Run on x86_64 and arm64 Linux to prove cross-architecture
 # behavior.
 #
-# NVC is the gated VHPIDIRECT simulator. GHDL/VHPIDIRECT is currently EXPERIMENTAL
-# and not gated: GHDL's marshaling of an `in string` + `out integer` foreign
-# procedure is version-dependent (recent GHDL emits "NOT IMPLEMENTED"), so the
-# per-instance NAME does not pass through reliably. NVC drives the exact same
-# VHDL + shim, so the VHPIDIRECT path itself is covered.
+# The from-source VHDL flow links the C backend at elaboration, so GHDL uses the
+# llvm/gcc backend (mcode loads a PREBUILT library instead -- tested in
+# artifact-test.yml, not here):
+#   * x86_64 -- modern GHDL via ghdl/setup-ghdl.
+#   * arm64  -- apt's ghdl-gcc (ghdl/setup-ghdl ships no arm64 asset).
 on:
   workflow_call:
 
@@ -24,7 +24,7 @@ jobs:
         os: [ubuntu-latest, ubuntu-24.04-arm]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install simulators
         run: |
           sudo apt-get update
@@ -32,7 +32,18 @@ jobs:
             build-essential verilator iverilog
       - name: Install NVC
         uses: ./.github/actions/setup-nvc
+      - name: Setup GHDL (x86_64)
+        if: ${{ runner.arch == 'X64' }}
+        uses: ghdl/setup-ghdl@v1
+        with:
+          backend: llvm
+      - name: Setup GHDL (arm64)
+        # ghdl/setup-ghdl publishes no arm64 Linux binary; noble's ghdl-llvm is
+        # broken (missing libLLVM-18.so.18.1). gcc has no libLLVM dep and links
+        # foreign code at elaboration just like llvm.
+        if: ${{ runner.arch == 'ARM64' }}
+        run: sudo apt-get install -y ghdl-gcc
       - name: Tool versions
-        run: verilator --version; iverilog -V | head -1; nvc --version | head -1
-      - name: End-to-end (DPI / VPI / NVC from source)
-        run: make e2e SIM=dpi,vpi,nvc
+        run: verilator --version; iverilog -V | head -1; ghdl --version | head -1; nvc --version | head -1
+      - name: End-to-end (DPI / VHPI / VPI from source)
+        run: make e2e
