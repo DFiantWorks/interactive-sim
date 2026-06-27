@@ -49,10 +49,12 @@ jobs:
       - name: Test prebuilt artifacts (Verilator/DPI, Icarus/VPI, NVC/VHPIDIRECT)
         run: python3 tests/e2e.py --dist dist --sim dpi,vpi,nvc
 
-  # Windows (MinGW) bundle: Verilator (DPI, links the shipped import lib), NVC
-  # (VHPIDIRECT, loaded at runtime with --load), and Icarus (VPI, loads the
-  # shipped .vpi). The MSVC bundle is not tested here: only commercial sims
-  # (Questa) consume it.
+  # Windows (MinGW) bundle: NVC (VHPIDIRECT, loaded at runtime with --load) and
+  # Icarus (VPI, loads the shipped .vpi). DPI/Verilator is not exercised here --
+  # building a Verilator DPI executable under MSYS2 is slow/heavy in CI; the
+  # Windows DPI library + import lib are build-verified (the artifact job), and
+  # DPI is e2e-tested on Linux and macOS. The MSVC bundle is not tested here:
+  # only commercial sims (Questa) consume it.
   artifact-test-windows:
     name: artifact-test (windows-x86_64-mingw)
     runs-on: windows-latest
@@ -76,12 +78,10 @@ jobs:
           install: >-
             make
             mingw-w64-x86_64-python
-            mingw-w64-x86_64-verilator
             mingw-w64-x86_64-iverilog
-      - name: Test prebuilt artifacts (Verilator/DPI, NVC/VHPIDIRECT --load, Icarus/VPI)
+      - name: Test prebuilt artifacts (NVC/VHPIDIRECT --load, Icarus/VPI)
         shell: msys2 {0}
         run: |
-          verilator --version
           nvc --version
           iverilog -V | head -1
-          python3 tests/e2e.py --dist dist --sim dpi,nvc,vpi
+          python3 tests/e2e.py --dist dist --sim nvc,vpi
