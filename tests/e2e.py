@@ -56,8 +56,20 @@ SIMS = {
 }
 
 
+def which(name):
+    if shutil.which(name):
+        return True
+    # MSYS2/MinGW ships extensionless wrapper scripts (e.g. `verilator`) that
+    # Windows' PATHEXT-based shutil.which misses, even though the simulators run
+    # them fine via make's shell. Scan PATH for the bare name too.
+    for d in os.environ.get("PATH", "").split(os.pathsep):
+        if d and os.path.isfile(os.path.join(d, name)):
+            return True
+    return False
+
+
 def have(tools):
-    return all(shutil.which(t) for t in tools)
+    return all(which(t) for t in tools)
 
 
 def run_one(sim, dist, build_timeout, read_timeout):
@@ -114,7 +126,9 @@ def run_one(sim, dist, build_timeout, read_timeout):
         while time.time() < deadline:
             try:
                 chunk = conn.recv(4096)
-            except socket.timeout:
+            except OSError:
+                # socket.timeout, or a connection reset on sim exit (Windows
+                # sends RST rather than a clean FIN) -- end of stream either way.
                 break
             if not chunk:
                 break                          # sim closed the link (clean exit)
