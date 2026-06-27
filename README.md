@@ -146,7 +146,7 @@ to consume them. Download the bundle for your platform from the
 ```
 interactive-sim-<ver>-<platform>/
   interactive_dpi.<so|dylib|dll>     DPI-C library  (Verilator / Questa / Vivado XSim)
-  interactive_vhpi.<so|dylib|dll>    VHPIDIRECT library (GHDL gcc/llvm, NVC)
+  interactive_vhpi.<so|dylib|dll>    VHPIDIRECT library (NVC; GHDL experimental)
   interactive.vpi                    VPI module (Icarus)         [not in the MSVC bundle]
   interactive_ctrl.{sv,v,vhdl}       per-component HDL shims
   interactive_flag.{sv,v,vhdl}
@@ -161,13 +161,14 @@ yourself with `make dist && make dist-vpi` (output in `build/dist/`).
 
 ## CI / tests
 
-`make e2e` runs the end-to-end test from source for every installed simulator
-(DPI/VHPI/NVC/VPI); `make e2e-dist DIST=build/dist` runs the same checks against
-the **prebuilt** libraries. Each demo connects over TCP to a listener and the
-test asserts the protocol handshake (every component announces itself; the
-heartbeat flag streams values). CI (`.github/workflows/`) runs both on every push
-and PR across Linux x86_64/arm64, macOS, and Windows, and gates each `v*` tag on
-the same checks before publishing the release archives.
+`make e2e` runs the end-to-end test from source for every installed simulator;
+`make e2e-dist DIST=build/dist` runs the same checks against the **prebuilt**
+libraries. Each demo connects over TCP to a listener and the test asserts the
+protocol handshake (every component announces itself; the heartbeat flag streams
+values). CI (`.github/workflows/`) gates **DPI (Verilator), VPI (Icarus), and
+VHPIDIRECT (NVC)** on every push and PR across Linux x86_64/arm64, macOS, and
+Windows — from source and against the prebuilt artifacts — and gates each `v*`
+tag on the same checks before publishing the release archives.
 
 ## Layout
 
@@ -192,9 +193,13 @@ ulx3s_demo/                  standalone graphical ULX3S board demo (own README +
 
 ## Status
 
-The four foreign-interface flows (DPI/Verilator, VPI/Icarus, VHPIDIRECT/GHDL,
-VHPIDIRECT/NVC) are exercised end-to-end in CI from source and against the
-prebuilt artifacts, on Linux (x86_64/arm64), macOS, and Windows. The GHDL/NVC
-flows rely on VHPIDIRECT passing a `string` parameter as a pointer to its first
-character (the documented GHDL/NVC behavior) — see the comments in
-`vhdl/interactive_pkg.vhdl`.
+DPI/Verilator, VPI/Icarus, and VHPIDIRECT/NVC are exercised end-to-end in CI from
+source and against the prebuilt artifacts, on Linux (x86_64/arm64), macOS, and
+Windows.
+
+**GHDL/VHPIDIRECT is experimental** and not yet gated. The VHPIDIRECT shim passes
+each component's `NAME` as an `in string` to a foreign procedure with an `out
+integer` handle; NVC marshals this per the documented convention (pointer to the
+first character), but recent GHDL emits "NOT IMPLEMENTED" for it, so the name does
+not pass through. NVC drives the identical VHDL + shim, so the VHPIDIRECT path
+itself is covered — see the comments in `vhdl/interactive_pkg.vhdl`.
