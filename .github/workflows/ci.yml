@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]      # CI on merges to main...
+  pull_request:           # ...and on every PR (feature branches run here, once)
+  workflow_dispatch:
+  # Release tags (v*) are handled by release.yml, not here -- so the publish
+  # path never appears on PR or main-push runs.
+
+permissions:
+  contents: read
+
+jobs:
+  # End-to-end source test (reusable; release.yml runs the same gate on a tag).
+  test:
+    uses: ./.github/workflows/test.yml
+
+  # Shareable artifacts: the portable, self-contained backend libraries for each
+  # OS/architecture, plus the Icarus VPI module. Defined in a reusable workflow
+  # so release.yml can build the exact same bundles on a tag.
+  artifacts:
+    uses: ./.github/workflows/build-artifacts.yml
+
+  # End-to-end test of the PREBUILT bundles, reused so release.yml gates a tag on
+  # the exact same checks.
+  artifact-tests:
+    needs: artifacts
+    uses: ./.github/workflows/artifact-test.yml
