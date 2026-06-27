@@ -112,6 +112,12 @@ make demo-nvc               # NVC
 In the viewer, type `btn_run=1` to start the counter and watch `led_count`
 update; `btn_run=0` freezes it. The `led_hb` heartbeat blinks independently.
 
+For a graphical example — a photo of the ULX3S board where you click the buttons
+with the mouse and watch the LEDs light up at their position — see the
+self-contained [`ulx3s_demo/`](ulx3s_demo/) (its own README + Makefile):
+
+![The ULX3S GUI demo running](ulx3s_demo/ulx3s_demo.gif)
+
 ## Usage in your own design
 
 ```systemverilog
@@ -181,6 +187,7 @@ examples/tb_demo.{v,sv,vhdl} per-flow demo testbenches
 tests/e2e.py                 end-to-end protocol test (source + prebuilt artifacts)
 ci/package-release.sh        pack per-platform release archives (CI, v* tags)
 .github/workflows/           CI + multi-platform artifact build + release
+ulx3s_demo/                  standalone graphical ULX3S board demo (own README + Makefile)
 ```
 
 ## Status
