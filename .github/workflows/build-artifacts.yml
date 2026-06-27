@@ -28,7 +28,7 @@ jobs:
           - { name: windows-x86_64-mingw, os: windows-latest, toolchain: mingw }
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # ---- POSIX (Linux/macOS): portable DPI + VHPI libraries via `make dist`,
       # plus the Icarus VPI module. iverilog supplies vpi_user.h for dist-vpi.
@@ -107,6 +107,16 @@ jobs:
             v/interactive_vpi.cpp backend/interactive.cpp \
             "$IVLP/lib/libvpi.a" -lws2_32 \
             -o build/dist/interactive.vpi
+          # Vivado XSim DPI trampoline: a kernel32-only static archive that XSim's
+          # own gcc can link (the real C++/winsock DLL can't be), which loads
+          # interactive_dpi.dll at run time and forwards. Guard it stays CRT-free,
+          # otherwise XSim won't link it.
+          gcc -O2 -c sv/interactive_dpi_xsim.c -o build/dist/interactive_dpi_xsim.o
+          ar rcs build/dist/interactive_dpi.a build/dist/interactive_dpi_xsim.o
+          if nm -u build/dist/interactive_dpi_xsim.o | grep -E ' U ' \
+               | grep -qvE '__imp_(LoadLibraryA|GetProcAddress|GetEnvironmentVariableA|lstrcpyA)'; then
+            echo "ERROR: XSim trampoline has non-kernel32 undefined symbols"; exit 1; fi
+          rm -f build/dist/interactive_dpi_xsim.o
           cp sv/interactive_ctrl.sv sv/interactive_flag.sv \
              v/interactive_ctrl.v v/interactive_flag.v \
              vhdl/interactive_ctrl.vhdl vhdl/interactive_flag.vhdl \
@@ -131,7 +141,7 @@ jobs:
         run: ls -l build/dist
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: interactive-${{ matrix.name }}
           path: build/dist/
@@ -147,7 +157,7 @@ jobs:
         run: bash ci/package-release.sh "${GITHUB_REF_NAME#v}" "${{ matrix.name }}" build/dist release
       - name: Upload release archive
         if: ${{ inputs.package_release }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-${{ matrix.name }}
           path: release/*.tar.gz

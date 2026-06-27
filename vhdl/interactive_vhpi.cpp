@@ -2,12 +2,15 @@
 //
 // VHPIDIRECT shim that lets GHDL/NVC drive the shared interactive-sim backend in
 // ../backend/interactive.cpp (the same core the DPI and VPI flows use).
-// VHPIDIRECT marshals integers, not pointers, so each component instance is an
-// integer id into a small registry here; `out integer` handles arrive as int*.
+// VHPIDIRECT marshals scalars (integer/real), not pointers, so each component
+// instance is an integer id into a small registry here; `out integer` handles
+// arrive as int*.
 //
-// The component name is passed as (char* base, int namelen): GHDL and NVC pass an
-// `in string` parameter as a pointer to its first character, so we rebuild it
-// with std::string(name, namelen).
+// The component NAME arrives as (char* base, int namelen): the VHDL side passes a
+// BOUNDED string(1 to 255) (a constrained array), which GHDL and NVC both pass as
+// a pointer to its first character, so we rebuild it with std::string(name,
+// namelen). A constrained array is required: GHDL does not implement marshaling
+// an unconstrained `string` to a foreign subprogram.
 
 #include <cstdint>
 #include <string>
@@ -29,12 +32,18 @@ void  interactive_close(void* handle);
 }
 
 namespace {
-std::vector<void*> g_handles;   // id -> core handle
+const int          kMaxName = 255;   // not NAME_MAX: that's a POSIX macro (limits.h)
+std::vector<void*> g_handles;        // id -> core handle
+
+std::string name_of(const char* name, int namelen) {
+    if (namelen < 0)        namelen = 0;
+    if (namelen > kMaxName) namelen = kMaxName;   // matches the VHDL name_t bound
+    return std::string(name, name + namelen);
+}
 }
 
 VHPI_EXPORT void vhpi_ctrl_open(int* handle, char* name, int namelen, int width) {
-    std::string nm(name, name + (namelen > 0 ? namelen : 0));
-    g_handles.push_back(interactive_ctrl_open(nm.c_str(), width));
+    g_handles.push_back(interactive_ctrl_open(name_of(name, namelen).c_str(), width));
     *handle = static_cast<int>(g_handles.size()) - 1;
 }
 
@@ -43,8 +52,7 @@ VHPI_EXPORT void vhpi_ctrl_read(int handle, int* result) {
 }
 
 VHPI_EXPORT void vhpi_flag_open(int* handle, char* name, int namelen, int width) {
-    std::string nm(name, name + (namelen > 0 ? namelen : 0));
-    g_handles.push_back(interactive_flag_open(nm.c_str(), width));
+    g_handles.push_back(interactive_flag_open(name_of(name, namelen).c_str(), width));
     *handle = static_cast<int>(g_handles.size()) - 1;
 }
 

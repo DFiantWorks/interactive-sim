@@ -40,10 +40,14 @@ ifneq (,$(findstring /,$(CXX)))
 endif
 DIST    ?= $(BUILD)/dist
 PYTHON  ?= python3        # GUI viewers need a Python with tkinter (use PYTHON=python on Windows)
+# The verilator command. Override to `verilator_bin` (with VERILATOR_ROOT set)
+# when the perl `verilator` wrapper isn't usable -- e.g. oss-cad-suite's wrapper
+# needs Pod::Usage, absent in some MSYS2/CI perls; verilator_bin needs neither.
+VERILATOR ?= verilator
 
 .PHONY: viewer lint-dpi demo-dpi demo-vpi demo-vhpi demo-nvc \
         demo-dpi-dist demo-vhpi-dist demo-nvc-dist demo-vpi-dist demo-mcode-dist \
-        dist dist-vpi e2e e2e-dist clean
+        dist dist-vpi dist-xsim e2e e2e-dist clean
 
 # ---- Reference viewer ------------------------------------------------------
 viewer:
@@ -51,30 +55,58 @@ viewer:
 
 # ---- DPI / Verilator (built WITH --timing for the ctrl #-delays) -----------
 lint-dpi:
-	verilator --lint-only -Wno-WIDTH --timing --top-module tb_demo \
+	$(VERILATOR) --lint-only -Wno-WIDTH --timing --top-module tb_demo \
 		examples/tb_demo.sv sv/interactive_ctrl.sv sv/interactive_flag.sv
 
 demo-dpi:
 	mkdir -p $(BUILD)/demo-dpi
-	verilator --cc --exe --build -j 0 -Wno-WIDTH --timing --timescale 1ns/1ps \
+	$(VERILATOR) --cc --exe --build -j 0 -Wno-WIDTH --timing --timescale 1ns/1ps \
 		--top-module tb_demo --Mdir $(BUILD)/demo-dpi -o tb_demo \
 		--main examples/tb_demo.sv sv/interactive_ctrl.sv sv/interactive_flag.sv $(abspath $(BACKEND)) \
-		-LDFLAGS "-pthread"
+		$(VERILATED_OPT) -LDFLAGS "-pthread $(SOCK_LIB) $(STATIC_CXX)"
 	INTERACTIVE_STREAM=$(STREAM) ./$(BUILD)/demo-dpi/tb_demo
 
 # ---- VPI / Icarus ----------------------------------------------------------
 IVL_INC := $(shell dirname $(shell command -v iverilog))/../include/iverilog
 UNAME_S := $(shell uname -s)
+# Sockets: Winsock on Windows (the #pragma comment(lib) in the source is MSVC-only,
+# so MinGW must link -lws2_32 explicitly); in libc on Linux/macOS.
 ifneq (,$(filter MINGW% MSYS% CYGWIN%,$(UNAME_S)))
+  SOCK_LIB := -lws2_32
+  # Statically fold libstdc++/libgcc into the Verilator exe on MinGW, so it does
+  # not depend on libstdc++-6.dll being on PATH at run time. Harmless across the
+  # DPI boundary -- it is extern "C", so no C++ objects cross between the exe and
+  # interactive_dpi.dll.
+  STATIC_CXX := -static-libstdc++ -static-libgcc
+  # Build the Verilator runtime at -O2, not Verilator's default -Os, on MinGW. The
+  # rolling MSYS2 gcc 16 makes std::string's move ctor inline-only (no out-of-line
+  # definition in its libstdc++ DLL or static .a), yet at -Os it declines to inline
+  # it at some call sites in verilated.cpp and emits an out-of-line *call* -- which
+  # then has nothing to resolve to (`undefined reference to ...
+  # basic_string(basic_string&&)`). -O2 inlines it, so no external reference is
+  # emitted. Passed via -CFLAGS, which lands last in CPPFLAGS and so overrides the
+  # earlier OPT_GLOBAL/OPT_FAST=-Os on every runtime + model object.
+  VERILATED_OPT := -CFLAGS -O2
+else
+  SOCK_LIB :=
+  STATIC_CXX :=
+  VERILATED_OPT :=
+endif
+# VPI module link: macOS resolves vpi_* via dynamic lookup at load; Windows/MinGW
+# links the VPI import library + winsock and folds in the runtime; Linux is a
+# plain -shared. The same recipe builds the demo module and the dist module.
+ifeq ($(UNAME_S),Darwin)
+  VPI_LINK := -bundle -undefined dynamic_lookup
+else ifneq (,$(filter MINGW% MSYS% CYGWIN%,$(UNAME_S)))
   VPI_LINK := -shared -static $(dir $(IVL_INC))../lib/libvpi.a -lws2_32
 else
-  VPI_LINK := -shared -pthread
+  VPI_LINK := -shared
 endif
+VPI_BUILD = $(CXXENV) $(CXX) -O2 -fPIC -I$(IVL_INC) v/interactive_vpi.cpp $(BACKEND) $(VPI_LINK)
 
 demo-vpi:
 	mkdir -p $(BUILD)/demo-vpi
-	$(CXXENV) $(CXX) -O2 -fPIC -I$(IVL_INC) v/interactive_vpi.cpp $(BACKEND) $(VPI_LINK) \
-		-o $(BUILD)/demo-vpi/interactive.vpi
+	$(VPI_BUILD) -o $(BUILD)/demo-vpi/interactive.vpi
 	iverilog -g2012 -o $(BUILD)/demo-vpi/tb_demo.vvp -s tb_demo \
 		examples/tb_demo.v v/interactive_ctrl.v v/interactive_flag.v
 	INTERACTIVE_STREAM=$(STREAM) \
@@ -136,7 +168,14 @@ endif
 DPI_LIB  := $(LIBPRE)interactive_dpi.$(LIBEXT)
 VHPI_LIB := $(LIBPRE)interactive_vhpi.$(LIBEXT)
 DIST_ABS := $(abspath $(DIST))
-RPATH    := -Wl,-rpath,$(DIST_ABS)
+# Embed the dist dir as an rpath so a linked consumer finds the .so/.dylib. On
+# Windows there is no rpath -- the DLL is located via PATH (the e2e harness adds
+# the dist dir) -- so leave it empty there.
+ifneq (,$(filter MINGW% MSYS% CYGWIN%,$(UNAME_S)))
+  RPATH  :=
+else
+  RPATH  := -Wl,-rpath,$(DIST_ABS)
+endif
 ifeq ($(UNAME_S),Darwin)
   # Make the dylibs relocatable so consumers can find them via -rpath.
   INST_DPI  := -Wl,-install_name,@rpath/$(DPI_LIB)
@@ -154,21 +193,28 @@ dist:
 		vhdl/interactive_pkg.vhdl > $(DIST)/interactive_pkg_mcode.vhdl
 	@echo "built $(DIST)/$(DPI_LIB) and $(DIST)/$(VHPI_LIB)"
 
-# Icarus VPI module -- needs iverilog's headers, so it's split from `dist`.
-# macOS resolves vpi_* via dynamic lookup at load; Windows/MinGW links the VPI
-# import library + winsock and folds in the runtime; Linux is a plain -shared.
-ifeq ($(UNAME_S),Darwin)
-  VPI_DIST_LINK := -bundle -undefined dynamic_lookup
-else ifneq (,$(filter MINGW% MSYS% CYGWIN%,$(UNAME_S)))
-  VPI_DIST_LINK := $(VPI_LINK)
-else
-  VPI_DIST_LINK := -shared
-endif
-
+# Icarus VPI module -- needs iverilog's headers, so it's split from `dist`. Same
+# link recipe (VPI_BUILD) as the demo module.
 dist-vpi:
 	mkdir -p $(DIST)
-	$(CXXENV) $(CXX) -O2 -fPIC -I$(IVL_INC) v/interactive_vpi.cpp $(BACKEND) \
-		$(VPI_DIST_LINK) -o $(DIST)/interactive.vpi
+	$(VPI_BUILD) -o $(DIST)/interactive.vpi
+
+# Vivado XSim DPI trampoline (Windows). XSim's -sv_lib wants a .a it can link with
+# its own gcc, and the real C++/winsock DPI DLL's ABI can't be linked that way; so
+# this kernel32-only archive forwards to interactive_dpi.dll at run time. Built
+# with the C compiler paired with CXX (must be C, not C++ -- the DPI symbols need
+# C linkage). Use: xelab tb -sv_root $(DIST) -sv_lib interactive_dpi (DLL on PATH)
+# Derive CC from CXX (g++ -> gcc) unless the user set it; make's built-in default
+# is `cc`, which `?=` would not override.
+ifeq ($(origin CC),default)
+  CC := $(CXX:g++=gcc)
+endif
+dist-xsim:
+	mkdir -p $(DIST)
+	$(CXXENV) $(CC) -O2 -c sv/interactive_dpi_xsim.c -o $(DIST)/interactive_dpi_xsim.o
+	$(CXXENV) ar rcs $(DIST)/interactive_dpi.a $(DIST)/interactive_dpi_xsim.o
+	rm -f $(DIST)/interactive_dpi_xsim.o
+	@echo "built $(DIST)/interactive_dpi.a (Vivado XSim DPI trampoline)"
 
 # ---- Artifact demos: drive tb_demo against the PREBUILT libs in $(DIST) -----
 # Same fixture as the demo-* targets, but the backend is NOT recompiled -- each
@@ -176,10 +222,10 @@ dist-vpi:
 # tests/e2e.py --dist calls these per simulator.
 demo-dpi-dist:
 	mkdir -p $(BUILD)/demo-dpi-dist
-	verilator --cc --exe --build -j 0 -Wno-WIDTH --timing --timescale 1ns/1ps \
+	$(VERILATOR) --cc --exe --build -j 0 -Wno-WIDTH --timing --timescale 1ns/1ps \
 		--top-module tb_demo --Mdir $(BUILD)/demo-dpi-dist -o tb_demo \
-		--main examples/tb_demo.sv sv/interactive_ctrl.sv sv/interactive_flag.sv \
-		-LDFLAGS "-L$(DIST_ABS) -linteractive_dpi $(RPATH) -pthread"
+		--main examples/tb_demo.sv sv/interactive_ctrl.sv sv/interactive_flag.sv $(VERILATED_OPT) \
+		-LDFLAGS "-L$(DIST_ABS) -linteractive_dpi $(RPATH) -pthread $(STATIC_CXX)"
 	INTERACTIVE_STREAM=$(STREAM) ./$(BUILD)/demo-dpi-dist/tb_demo
 
 demo-vhpi-dist:
