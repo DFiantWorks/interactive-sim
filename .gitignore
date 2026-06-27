@@ -12,8 +12,3 @@ obj_dir/
 # Python bytecode cache
 __pycache__/
 *.pyc
-
-# Board-image cache downloaded at runtime by viewer/ulx3s_viewer.py
-viewer/*.png
-viewer/*.jpg
-_board_image

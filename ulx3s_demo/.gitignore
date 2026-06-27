@@ -1,0 +1,8 @@
+# Build artifacts
+build/
+__pycache__/
+
+# Board-image cache downloaded at runtime by ulx3s_viewer.py
+*.png
+*.jpg
+_board_image
