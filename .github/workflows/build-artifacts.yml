@@ -1,0 +1,154 @@
+name: Build artifacts (reusable)
+
+# Reusable build of the portable, self-contained backend libraries for every
+# published platform (+ the Icarus VPI module). Called by ci.yml (PR / push to
+# main, no release packaging) and by release.yml (v* tag, with packaging). No
+# simulator is needed to build the libraries -- the backend has no simulator
+# headers (only the VPI module needs iverilog's vpi_user.h).
+on:
+  workflow_call:
+    inputs:
+      package_release:
+        description: Also pack per-platform release-* archives (version in the folder name).
+        type: boolean
+        default: false
+
+jobs:
+  artifacts:
+    name: artifact (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x86_64,   os: ubuntu-latest }
+          - { name: linux-arm64,    os: ubuntu-24.04-arm }
+          - { name: macos-arm64,    os: macos-15 }
+          - { name: macos-x86_64,   os: macos-15-intel }
+          - { name: windows-x86_64,       os: windows-latest, toolchain: msvc }
+          - { name: windows-x86_64-mingw, os: windows-latest, toolchain: mingw }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # ---- POSIX (Linux/macOS): portable DPI + VHPI libraries via `make dist`,
+      # plus the Icarus VPI module. iverilog supplies vpi_user.h for dist-vpi.
+      - name: Build DPI + VHPI libraries (POSIX)
+        if: runner.os != 'Windows'
+        run: make dist
+
+      - name: Build VPI module (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends iverilog g++
+          make dist-vpi
+
+      - name: Build VPI module (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install icarus-verilog
+          make dist-vpi
+
+      # ---- Windows / MSVC: DLLs for MSVC-ABI tools (Questa, Vivado XSim).
+      # Winsock is linked by a #pragma in the source.
+      - name: Set up MSVC
+        if: runner.os == 'Windows' && matrix.toolchain == 'msvc'
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Build DPI + VHPI DLLs (MSVC)
+        if: runner.os == 'Windows' && matrix.toolchain == 'msvc'
+        shell: cmd
+        run: |
+          mkdir build\dist
+          cl /O2 /LD /EHsc backend\interactive.cpp /Fe:build\dist\interactive_dpi.dll
+          cl /O2 /LD /EHsc backend\interactive.cpp vhdl\interactive_vhpi.cpp /Fe:build\dist\interactive_vhpi.dll
+          copy sv\interactive_ctrl.sv build\dist\
+          copy sv\interactive_flag.sv build\dist\
+          copy v\interactive_ctrl.v build\dist\
+          copy v\interactive_flag.v build\dist\
+          copy vhdl\interactive_ctrl.vhdl build\dist\
+          copy vhdl\interactive_flag.vhdl build\dist\
+          copy vhdl\interactive_pkg.vhdl build\dist\
+
+      # ---- Windows / MinGW (MSYS2): DLLs for MinGW-ABI tools (GHDL, NVC,
+      # Verilator) + the Icarus VPI module. MinGW ignores the Winsock #pragma, so
+      # link -lws2_32; fold in libstdc++/libgcc so the DLLs are self-contained.
+      - name: Set up MSYS2 (MinGW64)
+        if: matrix.toolchain == 'mingw'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          # iverilog supplies vpi_user.h + libvpi.a for the VPI module, built with
+          # the same MinGW that built its vvp (a foreign MinGW won't load).
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-iverilog
+      - name: Build DPI + VHPI DLLs + VPI module (MinGW)
+        if: matrix.toolchain == 'mingw'
+        shell: msys2 {0}
+        run: |
+          mkdir -p build/dist
+          # --out-implib: MinGW-ABI tools that LINK the DLL (Verilator/DPI,
+          # GHDL/VHPI llvm/gcc) need an import library; runtime loaders
+          # (NVC --load, GHDL mcode) don't. The folder-based release keeps
+          # filenames stable, so the import lib ships in every bundle.
+          g++ -O2 -shared -static \
+            backend/interactive.cpp -lws2_32 \
+            -Wl,--out-implib,build/dist/libinteractive_dpi.dll.a \
+            -o build/dist/interactive_dpi.dll
+          g++ -O2 -shared -static \
+            backend/interactive.cpp vhdl/interactive_vhpi.cpp -lws2_32 \
+            -Wl,--out-implib,build/dist/libinteractive_vhpi.dll.a \
+            -o build/dist/interactive_vhpi.dll
+          # Icarus VPI module: link the VPI import lib + winsock and fold in the
+          # runtime so it's self-contained.
+          IVLP="$(dirname "$(command -v iverilog)")/.."
+          g++ -O2 -shared -static -I"$IVLP/include/iverilog" \
+            v/interactive_vpi.cpp backend/interactive.cpp \
+            "$IVLP/lib/libvpi.a" -lws2_32 \
+            -o build/dist/interactive.vpi
+          cp sv/interactive_ctrl.sv sv/interactive_flag.sv \
+             v/interactive_ctrl.v v/interactive_flag.v \
+             vhdl/interactive_ctrl.vhdl vhdl/interactive_flag.vhdl \
+             vhdl/interactive_pkg.vhdl build/dist/
+          ls -l build/dist
+
+      # mcode-backend GHDL has no link step, so it loads the prebuilt VHPI DLL
+      # named in this wrapper's `foreign` strings (the canonical package leaves
+      # the library implicit for gcc/llvm GHDL + NVC). POSIX bundles get this
+      # from `make dist`; generate it here for both Windows bundles (the token is
+      # the Windows DLL name for both). `shell: bash` is Git Bash on the runner.
+      - name: Generate mcode VHDL wrapper (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          sed -E 's/(is "VHPIDIRECT) (vhpi_[a-z_]+")/\1 interactive_vhpi.dll \2/' \
+            build/dist/interactive_pkg.vhdl > build/dist/interactive_pkg_mcode.vhdl
+          ls -l build/dist
+
+      - name: Show artifact contents
+        if: runner.os != 'Windows'
+        run: ls -l build/dist
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: interactive-${{ matrix.name }}
+          path: build/dist/
+          if-no-files-found: error
+
+      # ---- Release packaging (only when the caller asks) -------------------
+      # Stamp the version into the FOLDER name and pack a per-platform archive.
+      # The repo/Makefile stay version-free, so the unversioned bundle above
+      # (and artifact-test) are unaffected.
+      - name: Package versioned release archive
+        if: ${{ inputs.package_release }}
+        shell: bash
+        run: bash ci/package-release.sh "${GITHUB_REF_NAME#v}" "${{ matrix.name }}" build/dist release
+      - name: Upload release archive
+        if: ${{ inputs.package_release }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.name }}
+          path: release/*.tar.gz
+          if-no-files-found: error

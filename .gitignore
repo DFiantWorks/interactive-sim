@@ -1,0 +1,19 @@
+# All build artifacts land under build/.
+build/
+obj_dir/
+
+# stray simulation/build outputs
+*.o
+*.cf
+*.vpi
+*.vvp
+*.out
+
+# Python bytecode cache
+__pycache__/
+*.pyc
+
+# Board-image cache downloaded at runtime by viewer/ulx3s_viewer.py
+viewer/*.png
+viewer/*.jpg
+_board_image
