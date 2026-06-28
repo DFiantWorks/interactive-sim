@@ -27,6 +27,7 @@ entity interactive_ctrl is
 end entity;
 
 architecture rtl of interactive_ctrl is
+    constant HEARTBEAT_US : integer := 1000;   -- internal heartbeat period (us)
 begin
     -- No clock: poll the viewer's latest value on this instance's own timebase.
     process
@@ -40,5 +41,22 @@ begin
             ctrl_read(handle, v);
             value <= std_logic_vector(to_unsigned(v, WIDTH));
         end loop;
+    end process;
+
+    -- Heartbeat: only the first interactive component to start claims the single
+    -- heartbeat slot and runs the periodic tick; every other instance stays idle.
+    -- One timer, one message, regardless of how many components the design has.
+    heartbeat : process
+        variable owner : integer;
+    begin
+        claim_heartbeat(owner);
+        if owner /= 0 then
+            loop
+                wait for HEARTBEAT_US * 1 us;
+                tick(real(now / 1 ns) / 1000.0);
+            end loop;
+        else
+            wait;
+        end if;
     end process;
 end architecture;

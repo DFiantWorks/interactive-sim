@@ -32,6 +32,8 @@ module interactive_ctrl #(
 );
     import "DPI-C" function chandle interactive_ctrl_open(input string name, input int width);
     import "DPI-C" function int     interactive_ctrl_read(input chandle handle);
+    import "DPI-C" function void    interactive_tick(input real t);
+    import "DPI-C" function int     interactive_claim_heartbeat();
     import "DPI-C" function void    interactive_close(input chandle handle);
 
     chandle handle;
@@ -50,6 +52,17 @@ module interactive_ctrl #(
             value = WIDTH'(interactive_ctrl_read(handle));
         end
     end
+
+    // Heartbeat: only the first interactive component to start claims the single
+    // heartbeat slot and runs the periodic tick; every other instance stays idle.
+    // One timer, one message, regardless of how many components the design has.
+    localparam int HEARTBEAT_US = 1000;   // internal heartbeat period (us)
+    initial
+        if (interactive_claim_heartbeat())
+            forever begin
+                #(HEARTBEAT_US);
+                interactive_tick($realtime);
+            end
 
     final interactive_close(handle);
 endmodule

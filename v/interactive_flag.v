@@ -20,12 +20,24 @@ module interactive_flag #(
 ) (
     input [WIDTH-1:0] value
 );
+    localparam HEARTBEAT_US = 1000;      // internal heartbeat period (us)
     integer handle;
 
     initial handle = $interactive_flag_open(NAME, WIDTH);
 
     always @(value)
         $interactive_flag_write(handle, $realtime, value);  // us (us/ns timescale)
+
+    // Heartbeat: only the first interactive component to start claims the single
+    // heartbeat slot and runs the periodic tick; every other instance stays idle.
+    // So the viewer keeps learning sim time even while `value` is quiet, with one
+    // timer and one message regardless of how many components the design has.
+    initial
+        if ($interactive_claim_heartbeat())
+            forever begin
+                #(HEARTBEAT_US);
+                $interactive_tick($realtime);
+            end
 
     final $interactive_close(handle);
 endmodule

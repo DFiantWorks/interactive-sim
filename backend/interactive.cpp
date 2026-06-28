@@ -26,13 +26,21 @@
 // across the whole simulation (a collision is reported and the later instance is
 // dropped from the registry).
 //
-// Wire protocol -- newline-delimited JSON, one message per line:
-//   sim  -> viewer  {"ev":"reg",  "name":"...","kind":"ctrl|flag","width":N}
+// Wire protocol -- newline-delimited JSON, one message per line. Every sim->viewer
+// message carries "t", the simulation time in microseconds:
+//   sim  -> viewer  {"ev":"reg",  "t":<us>,"name":"...","kind":"ctrl|flag","width":N}
 //                   {"ev":"flag", "t":<us>,"name":"...","val":N}
-//                   {"ev":"close","name":"..."}
+//                   {"ev":"time", "t":<us>}
+//                   {"ev":"close","t":<us>,"name":"..."}
 // Times are in microseconds: this is a human-interaction interface (buttons,
 // LEDs), so us resolution is ample -- still fine enough that a viewer can
 // integrate a fast-toggled flag's duty cycle into a perceived brightness.
+//
+// "time" is a heartbeat: the shims tick the backend on a periodic sim-time timer
+// (interactive_tick), and the backend emits a "time" message whenever sim time has
+// advanced past the last value it reported -- so the viewer always learns sim time
+// to ~heartbeat resolution even while no flag changes, yet many components ticking
+// at the same instant (or a flag write at that instant) collapse to one message.
 //   viewer -> sim   {"name":"...","val":N}
 // Inbound control messages are demultiplexed by a single background thread (the
 // connection manager) into a name->value map; interactive_ctrl_read looks up the
@@ -130,6 +138,9 @@ std::thread                    g_conn;        // the connection manager thread
 std::atomic<bool>              g_stop{false};
 bool                           g_conn_started = false;
 int                            g_open_count = 0;
+double                         g_now = 0.0;   // latest sim time (us) the backend has been told
+double                         g_reported = -1.0;  // sim time of the last time-bearing msg sent
+bool                           g_hb_claimed = false;  // heartbeat slot taken by one component
 
 // How long the manager waits between connection attempts while no viewer is up.
 constexpr int kReconnectMs = 500;
@@ -269,19 +280,24 @@ sock_t try_connect() {
 // just set g_sock, so the sends land on the new link. This is what makes the
 // viewer order-insensitive -- open it whenever and it catches up immediately.
 void replay_state_locked() {
+    char hdr[48];
     for (const auto& kv : g_registered) {
         const std::string& nm  = kv.first;
         const RegInfo&      inf = kv.second;
-        send_line_locked(std::string("{\"ev\":\"reg\",\"name\":") + jstr(nm) +
+        std::snprintf(hdr, sizeof(hdr), "{\"ev\":\"reg\",\"t\":%.3f,\"name\":", g_now);
+        send_line_locked(std::string(hdr) + jstr(nm) +
                          ",\"kind\":\"" + (inf.kind == KIND_CTRL ? "ctrl" : "flag") +
                          "\",\"width\":" + std::to_string(inf.width) + "}\n");
     }
     for (const auto& kv : g_last_flag) {
-        char num[64];
-        std::snprintf(num, sizeof(num), "{\"ev\":\"flag\",\"t\":%.3f,\"name\":", kv.second.t);
-        send_line_locked(std::string(num) + jstr(kv.first) +
+        std::snprintf(hdr, sizeof(hdr), "{\"ev\":\"flag\",\"t\":%.3f,\"name\":", kv.second.t);
+        send_line_locked(std::string(hdr) + jstr(kv.first) +
                          ",\"val\":" + std::to_string(kv.second.val) + "}\n");
     }
+    // Tell the freshly connected viewer the current sim time outright, so it has a
+    // timetag even before the next flag/heartbeat.
+    std::snprintf(hdr, sizeof(hdr), "{\"ev\":\"time\",\"t\":%.3f}\n", g_now);
+    send_line_locked(hdr);
 }
 
 // The background connection manager: keep a link to the viewer up for the life of
@@ -371,6 +387,28 @@ void shutdown_all() {
     if (g_sock != kBadSock) { sock_close(g_sock); g_sock = kBadSock; }
 }
 
+// Record the current sim time and the latest time the viewer has been told about.
+// g_reported is the dedup key for heartbeats: any time-bearing message (flag, reg,
+// or heartbeat) advances it, so a "time" tick at an already-reported instant is a
+// no-op. Caller holds g_mu.
+void note_time_locked(double t) {
+    g_now = t;
+    if (t > g_reported) g_reported = t;
+}
+
+// Heartbeat: emit a "time" message only if sim time has advanced past the last
+// time-bearing message. N components ticking at the same instant (or a flag write
+// at that instant) collapse to a single message. Caller holds g_mu.
+void tick_locked(double t) {
+    g_now = t;
+    if (t > g_reported) {
+        g_reported = t;
+        char buf[48];
+        std::snprintf(buf, sizeof(buf), "{\"ev\":\"time\",\"t\":%.3f}\n", t);
+        send_line_locked(buf);
+    }
+}
+
 // Announce a component to the viewer, after a uniqueness check on its name.
 Comp* open_comp(const char* name, int kind, int width) {
     std::lock_guard<std::mutex> lk(g_mu);
@@ -391,9 +429,12 @@ Comp* open_comp(const char* name, int kind, int width) {
     // Start the (re)connecting manager; the reg below is a no-op until a viewer is
     // up, but the manager replays it (and every flag's last value) on each connect.
     ensure_manager_started_locked();
-    send_line_locked(std::string("{\"ev\":\"reg\",\"name\":") + jstr(nm) +
+    char hdr[48];
+    std::snprintf(hdr, sizeof(hdr), "{\"ev\":\"reg\",\"t\":%.3f,\"name\":", g_now);
+    send_line_locked(std::string(hdr) + jstr(nm) +
                      ",\"kind\":\"" + (kind == KIND_CTRL ? "ctrl" : "flag") +
                      "\",\"width\":" + std::to_string(w) + "}\n");
+    note_time_locked(g_now);
     std::fprintf(stderr, "[interactive] %s '%s' (%d-bit) open\n",
                  kind == KIND_CTRL ? "ctrl" : "flag", nm.c_str(), w);
     return c;
@@ -431,6 +472,26 @@ IA_EXPORT void interactive_flag_write(void* handle, double t, int value) {
     std::snprintf(num, sizeof(num), "{\"ev\":\"flag\",\"t\":%.3f,\"name\":", t);
     send_line_locked(std::string(num) + jstr(c->name) +
                      ",\"val\":" + std::to_string(value) + "}\n");
+    note_time_locked(t);   // a flag write also reports the time -> dedups heartbeats
+}
+
+// Heartbeat tick from a shim's periodic timer: advance sim time and, if it moved
+// past the last reported instant, push a "time" message to the viewer.
+IA_EXPORT void interactive_tick(double t) {
+    std::lock_guard<std::mutex> lk(g_mu);
+    lazy_init_locked();
+    ensure_manager_started_locked();
+    tick_locked(t);
+}
+
+// Claim the single heartbeat slot. Returns 1 to exactly one caller (the first to
+// ask) and 0 to every other, so only one component instance runs the periodic
+// tick -- no redundant timers, one "time" message on the wire.
+IA_EXPORT int interactive_claim_heartbeat(void) {
+    std::lock_guard<std::mutex> lk(g_mu);
+    if (g_hb_claimed) return 0;
+    g_hb_claimed = true;
+    return 1;
 }
 
 IA_EXPORT void interactive_close(void* handle) {
@@ -439,7 +500,9 @@ IA_EXPORT void interactive_close(void* handle) {
     bool last = false;
     {
         std::lock_guard<std::mutex> lk(g_mu);
-        send_line_locked(std::string("{\"ev\":\"close\",\"name\":") + jstr(c->name) + "}\n");
+        char hdr[48];
+        std::snprintf(hdr, sizeof(hdr), "{\"ev\":\"close\",\"t\":%.3f,\"name\":", g_now);
+        send_line_locked(std::string(hdr) + jstr(c->name) + "}\n");
         g_registered.erase(c->name);
         g_last_flag.erase(c->name);
         if (--g_open_count <= 0) last = true;

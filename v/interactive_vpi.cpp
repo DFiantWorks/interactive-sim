@@ -29,6 +29,8 @@ void* interactive_ctrl_open(const char* name, int width);
 int   interactive_ctrl_read(void* handle);
 void* interactive_flag_open(const char* name, int width);
 void  interactive_flag_write(void* handle, double t, int value);
+void  interactive_tick(double t);
+int   interactive_claim_heartbeat(void);
 void  interactive_close(void* handle);
 }
 
@@ -110,6 +112,20 @@ PLI_INT32 flag_write_calltf(PLI_BYTE8*) {
     return 0;
 }
 
+PLI_INT32 tick_calltf(PLI_BYTE8*) {
+    vpiHandle systf = vpi_handle(vpiSysTfCall, nullptr);
+    vpiHandle a[1];
+    if (collect_args(systf, a, 1) < 1) return 0;
+    interactive_tick(as_real(a[0]));
+    return 0;
+}
+
+PLI_INT32 claim_heartbeat_calltf(PLI_BYTE8*) {
+    vpiHandle systf = vpi_handle(vpiSysTfCall, nullptr);
+    put_int_return(systf, interactive_claim_heartbeat());
+    return 0;
+}
+
 PLI_INT32 close_calltf(PLI_BYTE8*) {
     vpiHandle systf = vpi_handle(vpiSysTfCall, nullptr);
     vpiHandle a[1];
@@ -137,6 +153,8 @@ void register_tf() {
     reg_func("$interactive_ctrl_read",  ctrl_read_calltf);
     reg_func("$interactive_flag_open",  flag_open_calltf);
     reg_task("$interactive_flag_write", flag_write_calltf);
+    reg_task("$interactive_tick",       tick_calltf);
+    reg_func("$interactive_claim_heartbeat", claim_heartbeat_calltf);
     reg_task("$interactive_close",      close_calltf);
 }
 

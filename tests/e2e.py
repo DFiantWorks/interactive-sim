@@ -144,7 +144,8 @@ def run_one(sim, dist, build_timeout, read_timeout):
                     if proc.poll() is not None
                     else f"simulation never connected within {build_timeout}s")
 
-    regs, flags = set(), 0
+    regs, flags, times = set(), 0, 0
+    notime = 0                                 # sim->viewer messages missing a "t"
     conn.settimeout(read_timeout)
     buf = b""
     deadline = time.time() + read_timeout
@@ -168,10 +169,15 @@ def run_one(sim, dist, build_timeout, read_timeout):
                     msg = json.loads(line.decode("utf-8", "replace"))
                 except json.JSONDecodeError:
                     continue
-                if msg.get("ev") == "reg":
+                if "t" not in msg:             # every sim->viewer msg is timetagged
+                    notime += 1
+                ev = msg.get("ev")
+                if ev == "reg":
                     regs.add(msg.get("name"))
-                elif msg.get("ev") == "flag":
+                elif ev == "flag":
                     flags += 1
+                elif ev == "time":
+                    times += 1
     finally:
         conn.close()
     try:
@@ -189,7 +195,14 @@ def run_one(sim, dist, build_timeout, read_timeout):
     if flags == 0:
         print(f"  FAIL [{sim}] no flag events received (expected led_hb traffic)")
         return False
-    print(f"  PASS [{sim}] reg={len(regs)} ({', '.join(sorted(regs))})  flags={flags}")
+    if times == 0:
+        print(f"  FAIL [{sim}] no heartbeat 'time' events received")
+        return False
+    if notime:
+        print(f"  FAIL [{sim}] {notime} sim->viewer message(s) missing a 't' timetag")
+        return False
+    print(f"  PASS [{sim}] reg={len(regs)} ({', '.join(sorted(regs))})  "
+          f"flags={flags}  heartbeats={times}")
     return True
 
 

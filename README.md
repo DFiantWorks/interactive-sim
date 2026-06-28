@@ -82,20 +82,29 @@ is dropped.
 
 ## Wire protocol
 
-Newline-delimited JSON, one message per line:
+Newline-delimited JSON, one message per line. Every sim → viewer message carries
+`t`, the simulation time in µs:
 
 ```
-sim    -> viewer   {"ev":"reg",  "name":"btn_run","kind":"ctrl","width":1}
+sim    -> viewer   {"ev":"reg",  "t":1234.567,"name":"btn_run","kind":"ctrl","width":1}
                    {"ev":"flag", "t":1234.567,"name":"led_count","val":42}
-                   {"ev":"close","name":"btn_run"}
+                   {"ev":"time", "t":1234.567}
+                   {"ev":"close","t":1234.567,"name":"btn_run"}
 viewer -> sim      {"name":"btn_run","val":1}
 ```
 
 Plain JSON lines, so any GUI can speak it; the bundled
 `viewer/interactive_viewer.py` is just a reference terminal viewer.
 
+**Heartbeat.** `time` is a periodic heartbeat (1 ms of sim time) that lets the
+viewer track simulation time even while nothing else changes. Exactly **one**
+component runs the timer — the first to start claims the single heartbeat slot, so
+the wire cost is one message per tick regardless of how many components the design
+has. A flag write at the same instant counts as reporting the time, so coincident
+ticks collapse. There is no knob: the period is internal.
+
 **Time and resolution.** This is a human-interaction interface (buttons, LEDs),
-so the time base is the **microsecond**: the flag `t` tag is in µs and
+so the time base is the **microsecond**: every `t` tag is in µs and
 `interactive_ctrl` polls on a µs-scale `POLL_US` period (default 1 ms, well below
 human perception). 1 ns precision is still preserved, so for the one place finer
 timing matters (a fast-toggled flag dimmed by PWM duty cycle) a viewer can still
@@ -126,9 +135,11 @@ Consequences:
   delta within a component.
 - **Traffic scales with activity, not instance count.** A design with 200 idle
   LEDs and one blinking one sends one message per blink, not 200.
-- **Late joiners.** Because state is sent only on change, a viewer that connects
-  mid-run learns a flag's value only on its next change. (An initial state replay
-  or periodic snapshot would be a deliberate add-on, not the default.)
+- **Late joiners.** The link is order-insensitive: the backend keeps
+  (re)connecting, so the viewer can start after the sim and be closed and reopened
+  freely. On each (re)connect the backend replays the full state — a `reg` for
+  every open component, the last value of every flag, and the current `time` — so
+  a freshly opened viewer immediately shows the current board.
 
 ## Quick start
 

@@ -49,6 +49,13 @@ def reader(conn, registry):
                 continue
             ev = msg.get("ev")
             name = msg.get("name", "?")
+            t = msg.get("t", 0.0)
+            prompt = f"\r[t={t:10.3f}us] > "       # every message carries the sim time
+            if ev == "time":
+                # Heartbeat: refresh the clock on the prompt in place, no scroll.
+                sys.stdout.write(prompt)
+                sys.stdout.flush()
+                continue
             if ev == "reg":
                 registry[name] = msg
                 print(f"\r[reg]   {name:<16} kind={msg.get('kind')} "
@@ -57,12 +64,12 @@ def reader(conn, registry):
                 w = registry.get(name, {}).get("width", 1)
                 val = msg.get("val", 0)
                 print(f"\r[flag]  {name:<16} = {val}  (0x{val & ((1 << w) - 1):x}) "
-                      f"@ {msg.get('t', 0):.3f} us")
+                      f"@ {t:.3f} us")
             elif ev == "close":
                 print(f"\r[close] {name}")
             else:
                 print(f"\r[?] {msg}")
-            sys.stdout.write("> ")
+            sys.stdout.write(prompt)
             sys.stdout.flush()
     print("\r[viewer] simulation disconnected")
 

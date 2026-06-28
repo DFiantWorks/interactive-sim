@@ -311,6 +311,10 @@ class App:
         self.log = tk.Label(strip, text="", bg=PANEL_BG, fg=TEXT_DIM,
                             font=("Consolas", 10), anchor="e", padx=10)
         self.log.pack(side="right")
+        # Simulation clock, fed by the per-message timetag + the heartbeat.
+        self.clock = tk.Label(strip, text="t = —", bg=PANEL_BG, fg=TEXT,
+                              font=("Consolas", 10), anchor="e", padx=10)
+        self.clock.pack(side="right")
 
         if calibrate:
             self.canvas.bind("<Button-1>", self._calibrate_click)
@@ -420,6 +424,7 @@ class App:
             # so start clean: forget the previous run and clear all overlays.
             self.registry.clear()
             self.board.all_off()
+            self.clock.config(text="t = —")
             self._set_status("connected", f"simulation @ {payload}", OK_GREEN)
         elif kind == "disconnected":
             self._set_status("listening", "simulation disconnected — waiting "
@@ -428,9 +433,16 @@ class App:
         elif kind == "msg":
             self.handle_msg(payload)
 
+    def _set_clock(self, msg):
+        # Every sim->viewer message carries "t" (us); show it as ms.
+        t = msg.get("t")
+        if t is not None:
+            self.clock.config(text=f"t = {t / 1000.0:.3f} ms")
+
     def handle_msg(self, msg):
         ev = msg.get("ev")
         name = msg.get("name", "?")
+        self._set_clock(msg)
         if ev == "reg":
             self.registry[name] = msg
             self.log.config(text=f"reg {name} ({msg.get('kind')}, "
@@ -442,6 +454,7 @@ class App:
             self.log.config(text=f"{name} = 0x{val & ((1 << width) - 1):x}")
         elif ev == "close":
             self.log.config(text=f"close {name}")
+        # ev == "time" needs no extra handling: _set_clock already updated it.
 
     def _set_status(self, state, detail, color=TEXT):
         self.status.config(text=f"● {state}: {detail}", fg=color)
