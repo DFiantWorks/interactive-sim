@@ -25,11 +25,13 @@ import json
 import socket
 import sys
 import threading
+import time
 
 
 def reader(conn, registry):
     """Print every inbound event line from the simulation."""
     buf = b""
+    prev_sim = prev_wall = rate = None        # sim/wall speed tracking
     while True:
         try:
             chunk = conn.recv(4096)
@@ -42,6 +44,7 @@ def reader(conn, registry):
             line, buf = buf.split(b"\n", 1)
             if not line.strip():
                 continue
+            rx = time.monotonic()             # wall-clock arrival of this message
             try:
                 msg = json.loads(line.decode("utf-8", "replace"))
             except json.JSONDecodeError:
@@ -50,7 +53,15 @@ def reader(conn, registry):
             ev = msg.get("ev")
             name = msg.get("name", "?")
             t = msg.get("t", 0.0)
-            prompt = f"\r[t={t:10.3f}us] > "       # every message carries the sim time
+            # sim time advanced per second of wall-clock, between messages.
+            if prev_sim is not None:
+                dsim, dwall = (t - prev_sim) / 1e6, rx - prev_wall
+                if dsim > 0 and dwall > 0:
+                    inst = dsim / dwall
+                    rate = inst if rate is None else 0.7 * rate + 0.3 * inst
+            prev_sim, prev_wall = t, rx
+            rate_s = f" {rate:.1f}x" if rate is not None else ""
+            prompt = f"\r[t={t:10.3f}us{rate_s}] > "   # every message carries the sim time
             if ev == "time":
                 # Heartbeat: refresh the clock on the prompt in place, no scroll.
                 sys.stdout.write(prompt)

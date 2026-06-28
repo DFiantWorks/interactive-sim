@@ -46,6 +46,7 @@ import os
 import queue
 import socket
 import threading
+import time
 import tkinter as tk
 import urllib.request
 
@@ -277,6 +278,11 @@ class App:
         self.conn_lock = threading.Lock()
         self.registry = {}
         self.stop = False
+        # sim-time vs wall-clock tracking: (sim us, wall s) of the previous
+        # message, plus a smoothed sim/wall speed ratio.
+        self.prev_sim = None
+        self.prev_wall = None
+        self.rate = None
 
         img = cfg.get("image", {})
         scale = img.get("scale", 1.0)
@@ -311,10 +317,14 @@ class App:
         self.log = tk.Label(strip, text="", bg=PANEL_BG, fg=TEXT_DIM,
                             font=("Consolas", 10), anchor="e", padx=10)
         self.log.pack(side="right")
-        # Simulation clock, fed by the per-message timetag + the heartbeat.
+        # Simulation clock, fed by the per-message timetag + the heartbeat, and
+        # the sim/wall speed (sim time advanced per second of wall-clock).
         self.clock = tk.Label(strip, text="t = —", bg=PANEL_BG, fg=TEXT,
                               font=("Consolas", 10), anchor="e", padx=10)
         self.clock.pack(side="right")
+        self.rate_lbl = tk.Label(strip, text="—×", bg=PANEL_BG, fg=TEXT_DIM,
+                                 font=("Consolas", 10), anchor="e", padx=10)
+        self.rate_lbl.pack(side="right")
 
         if calibrate:
             self.canvas.bind("<Button-1>", self._calibrate_click)
@@ -389,10 +399,11 @@ class App:
                 if not line:
                     continue
                 try:
-                    self.q.put(("msg", json.loads(line.decode("utf-8",
-                                                              "replace"))))
+                    msg = json.loads(line.decode("utf-8", "replace"))
                 except json.JSONDecodeError:
-                    pass
+                    continue
+                msg["_rx"] = time.monotonic()   # wall-clock arrival of this message
+                self.q.put(("msg", msg))
 
     def send_control(self, name, val):
         with self.conn_lock:
@@ -425,6 +436,8 @@ class App:
             self.registry.clear()
             self.board.all_off()
             self.clock.config(text="t = —")
+            self.rate_lbl.config(text="—×")
+            self.prev_sim = self.prev_wall = self.rate = None
             self._set_status("connected", f"simulation @ {payload}", OK_GREEN)
         elif kind == "disconnected":
             self._set_status("listening", "simulation disconnected — waiting "
@@ -434,10 +447,22 @@ class App:
             self.handle_msg(payload)
 
     def _set_clock(self, msg):
-        # Every sim->viewer message carries "t" (us); show it as ms.
+        # Every sim->viewer message carries "t" (us); show it as ms, and track how
+        # fast sim time advances against wall-clock time between messages.
         t = msg.get("t")
-        if t is not None:
-            self.clock.config(text=f"t = {t / 1000.0:.3f} ms")
+        if t is None:
+            return
+        self.clock.config(text=f"t = {t / 1000.0:.3f} ms")
+        wall = msg.get("_rx")
+        if wall is not None and self.prev_sim is not None:
+            dsim = (t - self.prev_sim) / 1e6        # sim seconds since last message
+            dwall = wall - self.prev_wall           # wall seconds since last message
+            if dsim > 0 and dwall > 0:
+                inst = dsim / dwall                 # sim seconds per wall second
+                # Light smoothing so the readout doesn't flicker.
+                self.rate = inst if self.rate is None else 0.7 * self.rate + 0.3 * inst
+                self.rate_lbl.config(text=f"{self.rate:.1f}×")
+        self.prev_sim, self.prev_wall = t, wall
 
     def handle_msg(self, msg):
         ev = msg.get("ev")
