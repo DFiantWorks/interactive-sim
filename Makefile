@@ -126,13 +126,13 @@ demo-vhpi: $(BUILD)/demo-vhpi/backend.o $(BUILD)/demo-vhpi/vhpi.o
 		vhdl/interactive_pkg.vhdl vhdl/interactive_ctrl.vhdl vhdl/interactive_flag.vhdl examples/tb_demo.vhdl
 	$(GHDL) -e --std=08 --workdir=$(BUILD)/demo-vhpi -o $(BUILD)/demo-vhpi/tb_demo \
 		-Wl,$(BUILD)/demo-vhpi/backend.o -Wl,$(BUILD)/demo-vhpi/vhpi.o \
-		-Wl,-lstdc++ -Wl,-pthread tb_demo
+		-Wl,-lstdc++ -Wl,-pthread $(SOCK_LIB:%=-Wl,%) tb_demo
 	INTERACTIVE_STREAM=$(STREAM) ./$(BUILD)/demo-vhpi/tb_demo --stop-time=5ms
 
 # ---- VHPIDIRECT / NVC ------------------------------------------------------
 demo-nvc:
 	mkdir -p $(BUILD)/demo-nvc
-	$(CXXENV) $(CXX) -O2 -fPIC -shared $(BACKEND) vhdl/interactive_vhpi.cpp -lstdc++ -pthread \
+	$(CXXENV) $(CXX) -O2 -fPIC -shared $(BACKEND) vhdl/interactive_vhpi.cpp -lstdc++ -pthread $(SOCK_LIB) \
 		-o $(BUILD)/demo-nvc/libinteractive_vhpi.so
 	nvc --std=2008 --work=$(BUILD)/demo-nvc/work -a \
 		vhdl/interactive_pkg.vhdl vhdl/interactive_ctrl.vhdl vhdl/interactive_flag.vhdl examples/tb_demo.vhdl
