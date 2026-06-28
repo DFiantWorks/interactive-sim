@@ -87,6 +87,16 @@ ifneq (,$(filter MINGW% MSYS% CYGWIN%,$(UNAME_S)))
   # emitted. Passed via -CFLAGS, which lands last in CPPFLAGS and so overrides the
   # earlier OPT_GLOBAL/OPT_FAST=-Os on every runtime + model object.
   VERILATED_OPT := -CFLAGS -O2
+  # The native MinGW-w64 g++ needs a Windows-style TMP. make's recipe shell
+  # (sh.exe) leaves TMP/TEMP as a POSIX path (/tmp) or empty -- neither of which
+  # the native compiler can resolve, so it falls back to the unwritable C:\WINDOWS
+  # ("cannot create temporary file" -- breaks `dist` and the -shared/-static
+  # links). Point both at build/ in Windows form, computed once here; every CXXENV
+  # recipe creates build/ before it compiles. Skipped if cygpath isn't available.
+  WINTMP := $(shell cygpath -w "$(abspath $(BUILD))" 2>/dev/null)
+  ifneq (,$(WINTMP))
+    CXXENV += TMP="$(WINTMP)" TEMP="$(WINTMP)"
+  endif
 else
   SOCK_LIB :=
   STATIC_CXX :=
