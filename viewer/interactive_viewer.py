@@ -27,11 +27,17 @@ import sys
 import threading
 import time
 
+# Heartbeats per sim/wall speed sample: measure the ratio over the span from a
+# window's first heartbeat to its last, which averages out wall-clock jitter.
+RATE_WINDOW = 100
+
 
 def reader(conn, registry):
     """Print every inbound event line from the simulation."""
     buf = b""
-    prev_sim = prev_wall = rate = None        # sim/wall speed tracking
+    hb_anchor = None           # (sim us, wall s) of the window's first heartbeat
+    hb_count = 0
+    rate = None                # sim/wall ratio over the last full window
     while True:
         try:
             chunk = conn.recv(4096)
@@ -53,16 +59,20 @@ def reader(conn, registry):
             ev = msg.get("ev")
             name = msg.get("name", "?")
             t = msg.get("t", 0.0)
-            # Sim/wall speed, measured ONLY between heartbeats: they tick on a
-            # regular sim-time cadence, so the ratio is steady. (Flags fire at
-            # irregular times and burst, which made a per-message ratio jump.)
+            # Sim/wall speed, measured over a window of heartbeats: the ratio is
+            # the sim-time span divided by the wall-clock span from the window's
+            # first heartbeat to its last (RATE_WINDOW apart). Averaging over the
+            # span -- not adjacent beats -- smooths out wall-clock jitter.
             if ev == "time":
-                if prev_sim is not None:
-                    dsim, dwall = (t - prev_sim) / 1e6, rx - prev_wall
-                    if dsim > 0 and dwall > 0:
-                        inst = dsim / dwall
-                        rate = inst if rate is None else 0.7 * rate + 0.3 * inst
-                prev_sim, prev_wall = t, rx
+                if hb_anchor is None:
+                    hb_anchor, hb_count = (t, rx), 0
+                else:
+                    hb_count += 1
+                    if hb_count >= RATE_WINDOW - 1:
+                        dsim, dwall = (t - hb_anchor[0]) / 1e6, rx - hb_anchor[1]
+                        if dsim > 0 and dwall > 0:
+                            rate = dsim / dwall
+                        hb_anchor, hb_count = (t, rx), 0
             rate_s = f" {rate:.1f}x" if rate is not None else ""
             prompt = f"\r[t={t:10.3f}us{rate_s}] > "   # every message carries the sim time
             if ev == "time":
