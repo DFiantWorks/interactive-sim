@@ -327,7 +327,7 @@ class App:
         self.clock = tk.Label(strip, text="t = —", bg=PANEL_BG, fg=TEXT,
                               font=("Consolas", 10), anchor="e", padx=10)
         self.clock.pack(side="right")
-        self.rate_lbl = tk.Label(strip, text="—×", bg=PANEL_BG, fg=TEXT_DIM,
+        self.rate_lbl = tk.Label(strip, text="sim/real = —", bg=PANEL_BG, fg=TEXT_DIM,
                                  font=("Consolas", 10), anchor="e", padx=10)
         self.rate_lbl.pack(side="right")
 
@@ -441,7 +441,7 @@ class App:
             self.registry.clear()
             self.board.all_off()
             self.clock.config(text="t = —")
-            self.rate_lbl.config(text="—×")
+            self.rate_lbl.config(text="sim/real = —")
             self.hb_anchor = None
             self.hb_count = 0
             self.rate = None
@@ -478,7 +478,7 @@ class App:
             dwall = wall - wall0                     # wall seconds across the window
             if dsim > 0 and dwall > 0:
                 self.rate = dsim / dwall             # sim seconds per wall second
-                self.rate_lbl.config(text=f"{self.rate:.1f}×")
+                self.rate_lbl.config(text=f"sim/real = {self.rate:.1f}")
             self.hb_anchor = (t, wall)              # start the next window here
             self.hb_count = 0
 

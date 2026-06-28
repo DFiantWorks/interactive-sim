@@ -73,7 +73,7 @@ def reader(conn, registry):
                         if dsim > 0 and dwall > 0:
                             rate = dsim / dwall
                         hb_anchor, hb_count = (t, rx), 0
-            rate_s = f" {rate:.1f}x" if rate is not None else ""
+            rate_s = f" sim/real={rate:.1f}" if rate is not None else ""
             prompt = f"\r[t={t:10.3f}us{rate_s}] > "   # every message carries the sim time
             if ev == "time":
                 # Heartbeat: refresh the clock on the prompt in place, no scroll.
