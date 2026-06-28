@@ -447,16 +447,21 @@ class App:
             self.handle_msg(payload)
 
     def _set_clock(self, msg):
-        # Every sim->viewer message carries "t" (us); show it as ms, and track how
-        # fast sim time advances against wall-clock time between messages.
+        # Every sim->viewer message carries "t" (us); show it as ms.
         t = msg.get("t")
-        if t is None:
+        if t is not None:
+            self.clock.config(text=f"t = {t / 1000.0:.3f} ms")
+
+    def _update_rate(self, msg):
+        # Sim/wall speed, measured ONLY between heartbeats: they tick on a regular
+        # sim-time cadence, so the ratio is steady. (Flags fire at irregular times
+        # and arrive in bursts, which made a per-message ratio jump around.)
+        t, wall = msg.get("t"), msg.get("_rx")
+        if t is None or wall is None:
             return
-        self.clock.config(text=f"t = {t / 1000.0:.3f} ms")
-        wall = msg.get("_rx")
-        if wall is not None and self.prev_sim is not None:
-            dsim = (t - self.prev_sim) / 1e6        # sim seconds since last message
-            dwall = wall - self.prev_wall           # wall seconds since last message
+        if self.prev_sim is not None:
+            dsim = (t - self.prev_sim) / 1e6        # sim seconds since last heartbeat
+            dwall = wall - self.prev_wall           # wall seconds since last heartbeat
             if dsim > 0 and dwall > 0:
                 inst = dsim / dwall                 # sim seconds per wall second
                 # Light smoothing so the readout doesn't flicker.
@@ -479,7 +484,8 @@ class App:
             self.log.config(text=f"{name} = 0x{val & ((1 << width) - 1):x}")
         elif ev == "close":
             self.log.config(text=f"close {name}")
-        # ev == "time" needs no extra handling: _set_clock already updated it.
+        elif ev == "time":
+            self._update_rate(msg)
 
     def _set_status(self, state, detail, color=TEXT):
         self.status.config(text=f"● {state}: {detail}", fg=color)

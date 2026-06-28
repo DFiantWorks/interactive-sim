@@ -53,13 +53,16 @@ def reader(conn, registry):
             ev = msg.get("ev")
             name = msg.get("name", "?")
             t = msg.get("t", 0.0)
-            # sim time advanced per second of wall-clock, between messages.
-            if prev_sim is not None:
-                dsim, dwall = (t - prev_sim) / 1e6, rx - prev_wall
-                if dsim > 0 and dwall > 0:
-                    inst = dsim / dwall
-                    rate = inst if rate is None else 0.7 * rate + 0.3 * inst
-            prev_sim, prev_wall = t, rx
+            # Sim/wall speed, measured ONLY between heartbeats: they tick on a
+            # regular sim-time cadence, so the ratio is steady. (Flags fire at
+            # irregular times and burst, which made a per-message ratio jump.)
+            if ev == "time":
+                if prev_sim is not None:
+                    dsim, dwall = (t - prev_sim) / 1e6, rx - prev_wall
+                    if dsim > 0 and dwall > 0:
+                        inst = dsim / dwall
+                        rate = inst if rate is None else 0.7 * rate + 0.3 * inst
+                prev_sim, prev_wall = t, rx
             rate_s = f" {rate:.1f}x" if rate is not None else ""
             prompt = f"\r[t={t:10.3f}us{rate_s}] > "   # every message carries the sim time
             if ev == "time":
