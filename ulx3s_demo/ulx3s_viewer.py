@@ -60,6 +60,10 @@ WARN_AMBER  = "#e3b341"
 LED_OFF_RIM = "#000000"
 CAL_COLOR   = "#00e5ff"
 
+# Heartbeats per sim/wall speed sample: the ratio is measured over the span from
+# the window's first heartbeat to its last, which averages out wall-clock jitter.
+RATE_WINDOW = 100
+
 
 # ---------------------------------------------------------------------------
 # Image loading (URL or local path; Pillow if available, else stdlib Tk)
@@ -278,10 +282,11 @@ class App:
         self.conn_lock = threading.Lock()
         self.registry = {}
         self.stop = False
-        # sim-time vs wall-clock tracking: (sim us, wall s) of the previous
-        # message, plus a smoothed sim/wall speed ratio.
-        self.prev_sim = None
-        self.prev_wall = None
+        # sim-time vs wall-clock tracking: the (sim us, wall s) of the first
+        # heartbeat in the current window, a count of heartbeats since, and the
+        # ratio measured over the last full window.
+        self.hb_anchor = None
+        self.hb_count = 0
         self.rate = None
 
         img = cfg.get("image", {})
@@ -437,7 +442,9 @@ class App:
             self.board.all_off()
             self.clock.config(text="t = —")
             self.rate_lbl.config(text="—×")
-            self.prev_sim = self.prev_wall = self.rate = None
+            self.hb_anchor = None
+            self.hb_count = 0
+            self.rate = None
             self._set_status("connected", f"simulation @ {payload}", OK_GREEN)
         elif kind == "disconnected":
             self._set_status("listening", "simulation disconnected — waiting "
@@ -453,21 +460,27 @@ class App:
             self.clock.config(text=f"t = {t / 1000.0:.3f} ms")
 
     def _update_rate(self, msg):
-        # Sim/wall speed, measured ONLY between heartbeats: they tick on a regular
-        # sim-time cadence, so the ratio is steady. (Flags fire at irregular times
-        # and arrive in bursts, which made a per-message ratio jump around.)
+        # Sim/wall speed, measured over a whole window of heartbeats: the ratio is
+        # the sim-time span divided by the wall-clock span from the window's first
+        # heartbeat to its last (RATE_WINDOW apart). Averaging over the span -- not
+        # adjacent beats -- smooths out wall-clock jitter.
         t, wall = msg.get("t"), msg.get("_rx")
         if t is None or wall is None:
             return
-        if self.prev_sim is not None:
-            dsim = (t - self.prev_sim) / 1e6        # sim seconds since last heartbeat
-            dwall = wall - self.prev_wall           # wall seconds since last heartbeat
+        if self.hb_anchor is None:
+            self.hb_anchor = (t, wall)
+            self.hb_count = 0
+            return
+        self.hb_count += 1
+        if self.hb_count >= RATE_WINDOW - 1:        # heartbeat #(WINDOW-1) since #0
+            sim0, wall0 = self.hb_anchor
+            dsim = (t - sim0) / 1e6                  # sim seconds across the window
+            dwall = wall - wall0                     # wall seconds across the window
             if dsim > 0 and dwall > 0:
-                inst = dsim / dwall                 # sim seconds per wall second
-                # Light smoothing so the readout doesn't flicker.
-                self.rate = inst if self.rate is None else 0.7 * self.rate + 0.3 * inst
+                self.rate = dsim / dwall             # sim seconds per wall second
                 self.rate_lbl.config(text=f"{self.rate:.1f}×")
-        self.prev_sim, self.prev_wall = t, wall
+            self.hb_anchor = (t, wall)              # start the next window here
+            self.hb_count = 0
 
     def handle_msg(self, msg):
         ev = msg.get("ev")
