@@ -416,6 +416,10 @@ class App:
         if kind == "fatal":
             self._set_status("error", payload, WARN_AMBER)
         elif kind == "connected":
+            # The sim replays its full state (reg + last flag values) on connect,
+            # so start clean: forget the previous run and clear all overlays.
+            self.registry.clear()
+            self.board.all_off()
             self._set_status("connected", f"simulation @ {payload}", OK_GREEN)
         elif kind == "disconnected":
             self._set_status("listening", "simulation disconnected — waiting "
