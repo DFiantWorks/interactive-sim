@@ -25,6 +25,7 @@ entity interactive_flag is
 end entity;
 
 architecture rtl of interactive_flag is
+    constant HEARTBEAT_US : integer := 1000;   -- internal heartbeat period (us)
 begin
     process(value)
         variable handle : integer := -1;
@@ -34,5 +35,23 @@ begin
         end if;
         -- sim time in us (ns precision preserved as a fractional part)
         flag_write(handle, real(now / 1 ns) / 1000.0, slv2int(value));
+    end process;
+
+    -- Heartbeat: only the first interactive component to start claims the single
+    -- heartbeat slot and runs the periodic tick; every other instance stays idle.
+    -- This keeps the viewer learning sim time even while `value` is quiet, with one
+    -- timer and one message regardless of how many components the design has.
+    heartbeat : process
+        variable owner : integer;
+    begin
+        claim_heartbeat(owner);
+        if owner /= 0 then
+            loop
+                wait for HEARTBEAT_US * 1 us;
+                tick(real(now / 1 ns) / 1000.0);
+            end loop;
+        else
+            wait;
+        end if;
     end process;
 end architecture;

@@ -22,6 +22,7 @@ module interactive_ctrl #(
 ) (
     output reg [WIDTH-1:0] value
 );
+    localparam HEARTBEAT_US = 1000;  // internal heartbeat period (us)
     integer handle;
 
     initial begin
@@ -32,6 +33,16 @@ module interactive_ctrl #(
             value = $interactive_ctrl_read(handle);
         end
     end
+
+    // Heartbeat: only the first interactive component to start claims the single
+    // heartbeat slot and runs the periodic tick; every other instance stays idle.
+    // One timer, one message, regardless of how many components the design has.
+    initial
+        if ($interactive_claim_heartbeat())
+            forever begin
+                #(HEARTBEAT_US);
+                $interactive_tick($realtime);
+            end
 
     final $interactive_close(handle);
 endmodule

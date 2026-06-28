@@ -49,6 +49,16 @@ package interactive_pkg is
     procedure comp_close(handle : in integer);
     attribute foreign of comp_close : procedure is "VHPIDIRECT vhpi_close";
 
+    -- Heartbeat: report the current sim time (us) to the viewer. Handle-free; the
+    -- backend dedups so concurrent ticks at the same instant cost one message.
+    procedure tick(t : in real);
+    attribute foreign of tick : procedure is "VHPIDIRECT vhpi_tick";
+
+    -- Claim the single heartbeat slot: returns 1 to the first caller, 0 to the
+    -- rest, so exactly one component runs the periodic tick.
+    procedure claim_heartbeat(result : out integer);
+    attribute foreign of claim_heartbeat : procedure is "VHPIDIRECT vhpi_claim_heartbeat";
+
 end package;
 
 package body interactive_pkg is
@@ -98,6 +108,16 @@ package body interactive_pkg is
     procedure comp_close(handle : in integer) is
     begin
         null;
+    end procedure;
+
+    procedure tick(t : in real) is
+    begin
+        null;
+    end procedure;
+
+    procedure claim_heartbeat(result : out integer) is
+    begin
+        result := 0;
     end procedure;
 
 end package body;

@@ -28,6 +28,8 @@ void* interactive_ctrl_open(const char* name, int width);
 int   interactive_ctrl_read(void* handle);
 void* interactive_flag_open(const char* name, int width);
 void  interactive_flag_write(void* handle, double t, int value);
+void  interactive_tick(double t);
+int   interactive_claim_heartbeat(void);
 void  interactive_close(void* handle);
 }
 
@@ -58,6 +60,14 @@ VHPI_EXPORT void vhpi_flag_open(int* handle, char* name, int namelen, int width)
 
 VHPI_EXPORT void vhpi_flag_write(int handle, double t, int value) {
     interactive_flag_write(g_handles[handle], t, value);
+}
+
+VHPI_EXPORT void vhpi_tick(double t) {
+    interactive_tick(t);
+}
+
+VHPI_EXPORT void vhpi_claim_heartbeat(int* result) {
+    *result = interactive_claim_heartbeat();
 }
 
 VHPI_EXPORT void vhpi_close(int handle) {
