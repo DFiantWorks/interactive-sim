@@ -20,13 +20,17 @@ typedef int   (*ctrl_read_fn)(void*);
 typedef void* (*flag_open_fn)(const char*, int);
 typedef void  (*flag_write_fn)(void*, double, int);
 typedef void  (*close_fn)(void*);
+typedef void  (*tick_fn)(double);
+typedef int   (*claim_heartbeat_fn)(void);
 
-static ctrl_open_fn  p_ctrl_open;
-static ctrl_read_fn  p_ctrl_read;
-static flag_open_fn  p_flag_open;
-static flag_write_fn p_flag_write;
-static close_fn      p_close;
-static int           tried;
+static ctrl_open_fn        p_ctrl_open;
+static ctrl_read_fn        p_ctrl_read;
+static flag_open_fn        p_flag_open;
+static flag_write_fn       p_flag_write;
+static close_fn            p_close;
+static tick_fn             p_tick;
+static claim_heartbeat_fn  p_claim_heartbeat;
+static int                 tried;
 
 static void ensure(void) {
     if (tried) return;
@@ -36,11 +40,13 @@ static void ensure(void) {
         lstrcpyA(dll, "interactive_dpi.dll");
     HMODULE h = LoadLibraryA(dll);
     if (!h) return;
-    p_ctrl_open  = (ctrl_open_fn)  (void*)GetProcAddress(h, "interactive_ctrl_open");
-    p_ctrl_read  = (ctrl_read_fn)  (void*)GetProcAddress(h, "interactive_ctrl_read");
-    p_flag_open  = (flag_open_fn)  (void*)GetProcAddress(h, "interactive_flag_open");
-    p_flag_write = (flag_write_fn) (void*)GetProcAddress(h, "interactive_flag_write");
-    p_close      = (close_fn)      (void*)GetProcAddress(h, "interactive_close");
+    p_ctrl_open        = (ctrl_open_fn)        (void*)GetProcAddress(h, "interactive_ctrl_open");
+    p_ctrl_read        = (ctrl_read_fn)        (void*)GetProcAddress(h, "interactive_ctrl_read");
+    p_flag_open        = (flag_open_fn)        (void*)GetProcAddress(h, "interactive_flag_open");
+    p_flag_write       = (flag_write_fn)       (void*)GetProcAddress(h, "interactive_flag_write");
+    p_close            = (close_fn)            (void*)GetProcAddress(h, "interactive_close");
+    p_tick             = (tick_fn)             (void*)GetProcAddress(h, "interactive_tick");
+    p_claim_heartbeat  = (claim_heartbeat_fn)  (void*)GetProcAddress(h, "interactive_claim_heartbeat");
 }
 
 void* interactive_ctrl_open(const char* name, int width) {
@@ -57,4 +63,10 @@ void interactive_flag_write(void* h, double t, int value) {
 }
 void interactive_close(void* h) {
     ensure(); if (p_close) p_close(h);
+}
+void interactive_tick(double t) {
+    ensure(); if (p_tick) p_tick(t);
+}
+int interactive_claim_heartbeat(void) {
+    ensure(); return p_claim_heartbeat ? p_claim_heartbeat() : 0;
 }
