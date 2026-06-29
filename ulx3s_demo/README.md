@@ -1,35 +1,37 @@
 # ULX3S GUI demo
 
-A worked example of [interactive-sim](../) (the framework in the parent folder):
-a **photo of the [ULX3S](https://github.com/ulx3s/ulx3s) board** where you
-**click the buttons with the mouse** and watch the **8 user LEDs light up at
-their position on the board**.
+The **simulation half** of a worked graphical example of [interactive-sim](../)
+(the framework in the parent folder): a **photo of the
+[ULX3S](https://github.com/ulx3s/ulx3s) board** where you **click the buttons
+with the mouse** and watch the **8 user LEDs light up at their position on the
+board**.
 
-![The ULX3S GUI demo running: the simulation drives the LEDs and mouse clicks on
-the board buttons feed back into the design.](ulx3s_demo.gif)
-
-It reuses the framework unchanged (the same `interactive_ctrl` / `interactive_flag`
-components, the same C++ backend and VPI shim from `../`) and adds only:
+The graphical panel itself is **[fpga-isv](https://github.com/DFiantWorks/interactive-sim-viewer)**,
+the standalone interactive-sim panel viewer. It ships the ULX3S board as its
+bundled `ulx3s` example (the board photo + LED/button pixel map), so this folder
+no longer carries its own viewer — it only holds the demo design and a wall-clock
+pacing helper:
 
 | File | Role |
 |------|------|
-| `ulx3s_viewer.py` | config-driven graphical viewer (stdlib `tkinter`) |
-| `ulx3s.json` | board config: photo URL + LED/button pixel map + LED colour |
 | `tb_ulx3s.v` | the demo design: a "Larson scanner" driven by the buttons |
 | `realtime_vpi.cpp` | demo-only `$rt_sync` VPI helper that paces the sim to the wall clock |
 
+Everything else — the `interactive_ctrl` / `interactive_flag` components, the C++
+backend, and the VPI shim — is reused unchanged from [`../`](../).
+
 ## Run it
 
-Start the GUI first (it listens), then the simulation (it connects):
+Install the viewer once (a prebuilt binary, `pipx install fpga-isv`, or Homebrew —
+see the [fpga-isv README](https://github.com/DFiantWorks/interactive-sim-viewer#install)).
+Then start the GUI first (it listens), and the simulation second (it connects):
 
 ```sh
-make viewer PYTHON=python    # 1) the GUI window; needs a tkinter Python
+make viewer                  # 1) the fpga-isv GUI window, ULX3S example
 make demo                    # 2) the simulation, paced to the wall clock
 ```
 
-JPEG/cropped photos need [Pillow](https://pypi.org/project/pillow/)
-(`pip install pillow`); the default config uses a PNG that is downloaded and
-cached next to `ulx3s.json` on first run.
+`make viewer` is just a convenience wrapper for `fpga-isv --example ulx3s`.
 
 Controls (mouse, or the mirrored keys): **◀ / ▶** set the scanner sweep
 direction, **▲ / ▼** change speed, **F1** (space) pauses/resumes, **F2** (enter)
@@ -40,39 +42,23 @@ design edge-detects it.
 ## How it maps to the framework
 
 - **Buttons → `interactive_ctrl`.** A click is hit-tested against the button
-  regions in the map; the matched button's `NAME` is sent over the socket.
+  regions in fpga-isv's panel map; the matched button's `NAME` is sent over the
+  socket. `tb_ulx3s.v` instantiates one `interactive_ctrl` per button.
 - **LEDs → `interactive_flag`.** The 8 LEDs are one 8-bit `leds` flag; LED item
   *i* lights when bit *i* is 1, in the configured `on_color`.
 
-The viewer is just another viewer on the same wire protocol as the framework's
-reference terminal viewer (`../viewer/interactive_viewer.py`), so anything that
-speaks the protocol works here.
+The names in `tb_ulx3s.v` (`leds`, `btn_pwr`, `btn_fire1`, `btn_fire2`, `btn_up`,
+`btn_down`, `btn_left`, `btn_right`) match the `ulx3s` example's panel map. fpga-isv
+is a pure client of the same wire protocol as the framework's reference terminal
+viewer ([`../viewer/interactive_viewer.py`](../viewer/interactive_viewer.py)), so
+anything that speaks the protocol works here.
 
-## The config
+## The panel config (now in fpga-isv)
 
-All coordinates are in **original-image pixels**; `image.crop` trims the photo to
-the board and `image.scale` scales it for display, but the map stays in
-original-image pixels so it is independent of crop and window size.
-
-```jsonc
-{
-  "image":  { "url": "https://github.com/ulx3s/ulx3s/blob/master/pic/ULX3S_v303_top.png?raw=true",
-              "cache": "ULX3S_v303_top.png", "crop": [160, 195, 1650, 1010], "scale": 0.72 },
-  "leds":   { "on_color": "#ff5a36", "shape": "rect", "w": 26, "h": 32,
-              "items": [ { "name": "leds", "bit": 0, "x": 632, "y": 462 }, ... ] },
-  "buttons":[ { "name": "btn_pwr", "shape": "circle", "x": 1375, "y": 408,
-                "r": 42, "key": "p" }, ... ]
-}
-```
-
-To map a **different photo** (or retune the coordinates), point `image.url` at it
-and run the viewer with `--calibrate`: clicking the photo prints each click's
-original-image pixel coordinate, so you can read off the x/y for every LED and
-button.
-
-```sh
-python ulx3s_viewer.py --calibrate
-```
+The board photo, the LED/button pixel map, and the `--calibrate` workflow for
+mapping a different photo all live in fpga-isv now. See its
+[Config](https://github.com/DFiantWorks/interactive-sim-viewer#config) section
+for the JSON format and how to tune coordinates.
 
 ## Wall-clock pacing
 

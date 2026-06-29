@@ -1,13 +1,14 @@
 # ULX3S GUI demo for interactive-sim.
 #
-# A self-contained demo that drives the framework in ../ : a photo of the ULX3S
-# board where you click the buttons and watch the 8 user LEDs light up at their
-# position on the board. It reuses the framework's VPI shim + backend from the
-# parent repo and adds only the demo design (tb_ulx3s.v), a wall-clock pacing
-# VPI helper (realtime_vpi.cpp), and the graphical viewer (ulx3s_viewer.py).
+# The simulation half of a graphical ULX3S board demo: a photo of the board where
+# you click the buttons and watch the 8 user LEDs light up at their position. This
+# folder holds only the demo *design* (tb_ulx3s.v) plus a wall-clock pacing VPI
+# helper (realtime_vpi.cpp); it reuses the framework's VPI shim + backend from ../
 #
-# Start the GUI first (it listens), then run the simulation (it connects):
-#   make viewer PYTHON=python    # 1) the GUI window; needs a tkinter Python
+# The graphical panel is the standalone viewer fpga-isv, which ships the ULX3S
+# board as a bundled example (see https://github.com/DFiantWorks/interactive-sim-viewer
+# for install). Start the GUI first (it listens), then run the simulation (it connects):
+#   make viewer                  # 1) the fpga-isv GUI window, ULX3S example
 #   make demo                    # 2) the simulation, paced to the wall clock
 #   make clean
 
@@ -17,7 +18,6 @@ BUILD   := build
 HOST    ?= 127.0.0.1
 PORT    ?= 7777
 STREAM  ?= $(HOST):$(PORT)
-PYTHON  ?= python3        # the GUI viewer needs a Python with tkinter (PYTHON=python on Windows)
 
 # C++ compiler for the VPI modules. On Windows, oss-cad-suite's libvpi.a is built
 # with MinGW-w64, so it MUST be linked with a MinGW-w64 g++ -- the MSYS/Cygwin gcc
@@ -47,9 +47,12 @@ endif
 
 .PHONY: viewer demo clean
 
-# ---- Graphical board viewer (tkinter; reads ./ulx3s.json) ------------------
+# ---- Graphical board viewer (fpga-isv, ULX3S example) ----------------------
+# fpga-isv is the standalone interactive-sim panel viewer; install it from
+# https://github.com/DFiantWorks/interactive-sim-viewer (pipx install fpga-isv,
+# Homebrew, or a prebuilt binary). The ULX3S board ships as a bundled example.
 viewer:
-	$(PYTHON) ulx3s_viewer.py --host 0.0.0.0 --port $(PORT)
+	fpga-isv --example ulx3s --host 0.0.0.0 --port $(PORT)
 
 # ---- ULX3S design / Icarus, paced to the wall clock for live animation -----
 # Builds the framework `interactive` VPI module (from ../) AND a demo-only

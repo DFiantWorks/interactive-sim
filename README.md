@@ -149,6 +149,12 @@ Start the viewer first (it listens; the sim connects as a client):
 make viewer                 # listens on 127.0.0.1:7777 by default (PORT=...)
 ```
 
+This is the reference *terminal* viewer
+([viewer/interactive_viewer.py](viewer/interactive_viewer.py)). For a graphical
+panel viewer that draws a board photo with clickable buttons and LEDs, use
+[**fpga-isv**](https://github.com/DFiantWorks/interactive-sim-viewer) instead —
+any client speaking the wire protocol works (see the ULX3S demo below).
+
 In another terminal, run a demo (button gates a counter, surfaced as flags):
 
 ```sh
@@ -162,10 +168,14 @@ In the viewer, type `btn_run=1` to start the counter and watch `led_count`
 update; `btn_run=0` freezes it. The `led_hb` heartbeat blinks independently.
 
 For a graphical example (a photo of the ULX3S board where you click the buttons
-with the mouse and watch the LEDs light up at their position) see the
-self-contained [`ulx3s_demo/`](ulx3s_demo/) (its own README + Makefile):
+with the mouse and watch the LEDs light up at their position) see
+[`ulx3s_demo/`](ulx3s_demo/) (its own README + Makefile). It holds the demo
+*design*; the graphical panel is
+[**fpga-isv**](https://github.com/DFiantWorks/interactive-sim-viewer), the
+standalone interactive-sim panel viewer, which ships the ULX3S board as a bundled
+example:
 
-![The ULX3S GUI demo running](ulx3s_demo/ulx3s_demo.gif)
+![The ULX3S GUI demo running](https://github.com/DFiantWorks/interactive-sim-viewer/blob/main/docs/ulx3s_demo.gif?raw=true)
 
 ## Usage in your own design
 
@@ -316,7 +326,7 @@ examples/tb_demo.{v,sv,vhdl} per-flow demo testbenches
 tests/e2e.py                 end-to-end protocol test (source + prebuilt artifacts)
 ci/package-release.sh        pack per-platform release archives (CI, v* tags)
 .github/workflows/           CI + multi-platform artifact build + release
-ulx3s_demo/                  standalone graphical ULX3S board demo (own README + Makefile)
+ulx3s_demo/                  graphical ULX3S board demo: the sim design (GUI = fpga-isv)
 ```
 
 ## Status

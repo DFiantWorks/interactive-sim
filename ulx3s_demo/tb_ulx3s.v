@@ -2,8 +2,10 @@
 //
 // A ULX3S-board GUI demo for interactive-sim, end-to-end on the VPI/Icarus flow.
 // It models the 8 user LEDs and the board's push-buttons as interactive-sim
-// components, all funnelled to the graphical viewer (ulx3s_viewer.py)
-// over one socket:
+// components, all funnelled to the graphical viewer over one socket. The viewer
+// is fpga-isv (https://github.com/DFiantWorks/interactive-sim-viewer), which
+// ships this board as its bundled `ulx3s` example; the LED/button names below
+// match that example's panel map:
 //
 //   * interactive_ctrl "btn_pwr"               -- lights the whole LED bar while held
 //   * interactive_ctrl "btn_left"/"btn_right"  -- sweep direction of a "Larson scanner"
@@ -18,7 +20,7 @@
 //
 // Run (from this ulx3s_demo/ folder). Start the GUI viewer first, then click the
 // buttons on the board and watch the LEDs sweep:
-//   make viewer              # in one terminal (the GUI; it listens)
+//   make viewer              # in one terminal (fpga-isv, ULX3S example; it listens)
 //   make demo                # in another  (the sim; it connects)
 //
 // NOTE: this testbench calls $rt_sync (realtime_vpi.cpp), a demo-only
