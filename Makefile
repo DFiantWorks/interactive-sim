@@ -39,7 +39,7 @@ ifneq (,$(findstring /,$(CXX)))
   CXXENV := PATH="$(dir $(CXX)):$$PATH"
 endif
 DIST    ?= $(BUILD)/dist
-PYTHON  ?= python3        # GUI viewers need a Python with tkinter (use PYTHON=python on Windows)
+PYTHON  ?= python3        # the reference viewer + e2e test are stdlib Python (use PYTHON=python on Windows)
 # The verilator command. Override to `verilator_bin` (with VERILATOR_ROOT set)
 # when the perl `verilator` wrapper isn't usable -- e.g. oss-cad-suite's wrapper
 # needs Pod::Usage, absent in some MSYS2/CI perls; verilator_bin needs neither.
