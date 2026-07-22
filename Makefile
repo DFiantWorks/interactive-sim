@@ -69,6 +69,16 @@ demo-dpi:
 # ---- VPI / Icarus ----------------------------------------------------------
 IVL_INC := $(shell dirname $(shell command -v iverilog))/../include/iverilog
 UNAME_S := $(shell uname -s)
+# Linux gcc-13+ redirects strtol to __isoc23_strtol@GLIBC_2.38, which bumps the
+# glibc floor of every backend library and breaks loading under simulators that
+# ship an older bundled glibc (oss-cad-suite's vvp, 2.35). Wrap it back to the
+# classic strtol so the libs load everywhere. Linux-only; empty elsewhere. Folded
+# into the DPI, VHPI, and VPI links below. See v/glibc_compat.c.
+ifeq ($(UNAME_S),Linux)
+  GLIBC_COMPAT := -Wl,--wrap=__isoc23_strtol v/glibc_compat.c
+else
+  GLIBC_COMPAT :=
+endif
 # Sockets: Winsock on Windows (the #pragma comment(lib) in the source is MSVC-only,
 # so MinGW must link -lws2_32 explicitly); in libc on Linux/macOS.
 ifneq (,$(filter MINGW% MSYS% CYGWIN%,$(UNAME_S)))
@@ -110,7 +120,7 @@ ifeq ($(UNAME_S),Darwin)
 else ifneq (,$(filter MINGW% MSYS% CYGWIN%,$(UNAME_S)))
   VPI_LINK := -shared -static $(dir $(IVL_INC))../lib/libvpi.a -lws2_32
 else
-  VPI_LINK := -shared
+  VPI_LINK := -shared $(GLIBC_COMPAT)
 endif
 VPI_BUILD = $(CXXENV) $(CXX) -O2 -fPIC -I$(IVL_INC) v/interactive_vpi.cpp $(BACKEND) $(VPI_LINK)
 
@@ -194,8 +204,8 @@ endif
 
 dist:
 	mkdir -p $(DIST)
-	$(CXXENV) $(CXX) -O2 -fPIC $(DIST_FLAGS) $(INST_DPI)  $(BACKEND) $(DIST_LIBS) -o $(DIST)/$(DPI_LIB)
-	$(CXXENV) $(CXX) -O2 -fPIC $(DIST_FLAGS) $(INST_VHPI) $(BACKEND) vhdl/interactive_vhpi.cpp $(DIST_LIBS) -o $(DIST)/$(VHPI_LIB)
+	$(CXXENV) $(CXX) -O2 -fPIC $(DIST_FLAGS) $(INST_DPI)  $(BACKEND) $(GLIBC_COMPAT) $(DIST_LIBS) -o $(DIST)/$(DPI_LIB)
+	$(CXXENV) $(CXX) -O2 -fPIC $(DIST_FLAGS) $(INST_VHPI) $(BACKEND) vhdl/interactive_vhpi.cpp $(GLIBC_COMPAT) $(DIST_LIBS) -o $(DIST)/$(VHPI_LIB)
 	cp sv/interactive_ctrl.sv sv/interactive_flag.sv \
 	   v/interactive_ctrl.v v/interactive_flag.v \
 	   vhdl/interactive_ctrl.vhdl vhdl/interactive_flag.vhdl vhdl/interactive_pkg.vhdl $(DIST)/
