@@ -46,7 +46,7 @@ module interactive_flag #(
     // timer and one message regardless of how many components the design has.
     localparam int HEARTBEAT_US = 1000;    // internal heartbeat period (us)
     initial
-        if (interactive_claim_heartbeat())
+        if (interactive_claim_heartbeat() != 0)
             forever begin
                 #(HEARTBEAT_US);
                 interactive_tick($realtime);

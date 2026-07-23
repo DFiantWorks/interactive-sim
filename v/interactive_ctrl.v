@@ -38,7 +38,7 @@ module interactive_ctrl #(
     // heartbeat slot and runs the periodic tick; every other instance stays idle.
     // One timer, one message, regardless of how many components the design has.
     initial
-        if ($interactive_claim_heartbeat())
+        if ($interactive_claim_heartbeat() != 0)
             forever begin
                 #(HEARTBEAT_US);
                 $interactive_tick($realtime);

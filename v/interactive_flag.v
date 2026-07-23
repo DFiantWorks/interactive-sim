@@ -33,7 +33,7 @@ module interactive_flag #(
     // So the viewer keeps learning sim time even while `value` is quiet, with one
     // timer and one message regardless of how many components the design has.
     initial
-        if ($interactive_claim_heartbeat())
+        if ($interactive_claim_heartbeat() != 0)
             forever begin
                 #(HEARTBEAT_US);
                 $interactive_tick($realtime);
